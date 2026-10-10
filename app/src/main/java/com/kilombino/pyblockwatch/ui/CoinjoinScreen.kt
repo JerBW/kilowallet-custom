@@ -456,20 +456,33 @@ private fun MyPoolCard(
                 var confirmLeave by remember { mutableStateOf(false) }
                 if (confirmLeave) androidx.compose.material3.AlertDialog(
                     onDismissRequest = { confirmLeave = false },
-                    title = { Text(if (st.creator) "End this pool?" else "Leave this pool?") },
+                    title = { Text(if (st.creator) "Cancel this pool?" else "Leave this pool?") },
                     text = { Text(if (st.creator)
                         "The round is cancelled for everyone in it, and they are told so. Nobody loses anything: no " +
                             "transaction exists until all have signed, so every coin stays where it is."
                         else "Your seat is freed and your coin is yours to spend again. Nothing was signed, so nothing moves.") },
                     confirmButton = { TextButton(onClick = { confirmLeave = false; act { session?.leave() } }) {
-                        Text(if (st.creator) "END POOL" else "LEAVE", color = Bad) } },
+                        Text(if (st.creator) "CANCEL POOL" else "LEAVE", color = Bad) } },
                     dismissButton = { TextButton(onClick = { confirmLeave = false }) { Text("STAY", color = TextSoft) } },
+                    containerColor = PanelBg, titleContentColor = TextMain, textContentColor = TextSoft,
+                )
+                var confirmClose by remember { mutableStateOf(false) }
+                if (confirmClose) androidx.compose.material3.AlertDialog(
+                    onDismissRequest = { confirmClose = false },
+                    title = { Text("Close the pool now with $people people?") },
+                    text = { Text("Everyone in the pool is asked to accept within ${Protocol.VOTE_SECONDS / 60} minutes; whoever " +
+                        "does not answer is left out of this round. If enough say yes, the round starts: each wallet posts " +
+                        "its mixed output and then you sign, so keep the app open until it is sent. Nobody else can join " +
+                        "once it closes.") },
+                    confirmButton = { TextButton(onClick = { confirmClose = false; act { session?.requestClose() } }) {
+                        Text("ASK TO CLOSE", color = accent) } },
+                    dismissButton = { TextButton(onClick = { confirmClose = false }) { Text("NOT NOW", color = TextSoft) } },
                     containerColor = PanelBg, titleContentColor = TextMain, textContentColor = TextSoft,
                 )
                 if (st.phase == PoolSession.Phase.OPEN) {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        if (people >= st.terms.minPeers) btn("ASK TO CLOSE NOW", true, Modifier.weight(1f)) { act { session?.requestClose() } }
-                        btn(if (st.creator) "END POOL" else "LEAVE", modifier = Modifier.weight(1f)) { confirmLeave = true }
+                        if (people >= st.terms.minPeers) btn("ASK TO CLOSE NOW", true, Modifier.weight(1f)) { confirmClose = true }
+                        btn(if (st.creator) "CANCEL POOL" else "LEAVE", modifier = Modifier.weight(1f)) { confirmLeave = true }
                     }
                     if (people < st.terms.minPeers) Text("Closes once ${st.terms.minPeers} people are in.",
                         color = TextFaint, style = MaterialTheme.typography.bodySmall)
@@ -481,7 +494,7 @@ private fun MyPoolCard(
                             "out; if too few are left, the pool reopens without them.",
                             color = TextSoft, style = MaterialTheme.typography.bodySmall)
                         Spacer(Modifier.height(6.dp))
-                        btn(if (st.creator) "END POOL" else "LEAVE", modifier = Modifier.fillMaxWidth()) { confirmLeave = true }
+                        btn(if (st.creator) "CANCEL POOL" else "LEAVE", modifier = Modifier.fillMaxWidth()) { confirmLeave = true }
                     } else {
                         Text("Answer before $by.", color = TextSoft, style = MaterialTheme.typography.bodySmall)
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
