@@ -1382,7 +1382,38 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
     private fun nextUnused(chainIndex: Int): Int {
         val seen = _state.value.chains.values.flatMap { it.rows }.filter { it.chainIndex == chainIndex }
             .maxOfOrNull { it.index }?.plus(1) ?: 0
-        return maxOf(seen, _state.value.xpub?.let { store.usedTop(it, chainIndex) } ?: 0)
+        val top = maxOf(seen, _state.value.xpub?.let { store.usedTop(it, chainIndex) } ?: 0)
+        return maxOf(top, coinjoinReservedTop(chainIndex, top))
+    }
+
+    /**
+     * One past the highest address a coinjoin seat holds on [chainIndex] (0: the mixed output,
+     * 1: the change), counting only pools that still need them. A pool that ended before this
+     * wallet posted its output never showed those addresses on chain or in the round, so they
+     * go back to the queue: cancelled pools leave no gap in the address chain.
+     */
+    private fun coinjoinReservedTop(chainIndex: Int, from: Int): Int {
+        val xpub = _state.value.xpub ?: return 0
+        // The saved pools must be in memory before any address is handed out.
+        runCatching { com.kilombino.pyblockwatch.coinjoin.CoinjoinHub.load(getApplication()) }
+        val scripts = com.kilombino.pyblockwatch.coinjoin.CoinjoinHub.states.value
+            .filter { st ->
+                val ended = st.phase == com.kilombino.pyblockwatch.coinjoin.PoolSession.Phase.ABORTED ||
+                    st.phase == com.kilombino.pyblockwatch.coinjoin.PoolSession.Phase.REJECTED
+                !(ended && !st.postedOutput)
+            }
+            .mapNotNull { if (chainIndex == 0) it.mixScript else it.seat.changeScript }
+            .map { it.toList() }.toSet()
+        if (scripts.isEmpty()) return 0
+        val parsed = runCatching { com.kilombino.pyblockwatch.crypto.Bip32.parseExtendedPubKey(xpub) }.getOrNull() ?: return 0
+        // Reservations sit right after what is used; look a little past it.
+        var top = 0
+        for (i in maxOf(0, from - 30) until from + 60) {
+            val sp = com.kilombino.pyblockwatch.crypto.Address.scriptPubKey(
+                com.kilombino.pyblockwatch.crypto.Bip32.derivePath(parsed, chainIndex, i).pubkey(), store.scriptType).toList()
+            if (sp in scripts) top = i + 1
+        }
+        return top
     }
 
     /** Remember how far each branch has been used, so the other chain knows before its own scan. */
@@ -1616,8 +1647,10 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
             .fromSeed(com.kilombino.pyblockwatch.crypto.Bip39.toSeed(secret.words, secret.passphrase))
         val path = "m/$purpose'/0'/0'/${u.chainIndex}/${u.index}"
         val node = com.kilombino.pyblockwatch.crypto.Bip32Priv.derivePath(master, path)
-        val mixIndex = nextUnused(0); store.noteUsedTop(xpub, 0, mixIndex + 1)
-        val changeIndex = nextUnused(1); store.noteUsedTop(xpub, 1, changeIndex + 1)
+        // Held by the pool's saved state (coinjoinReservedTop), not marked used: if the pool is
+        // cancelled before anything is posted, the next payment or pool takes them again.
+        val mixIndex = nextUnused(0)
+        val changeIndex = nextUnused(1)
         val parsed = com.kilombino.pyblockwatch.crypto.Bip32.parseExtendedPubKey(xpub)
         fun script(branch: Int, i: Int) = com.kilombino.pyblockwatch.crypto.Address.scriptPubKey(
             com.kilombino.pyblockwatch.crypto.Bip32.derivePath(parsed, branch, i).pubkey(), store.scriptType)
