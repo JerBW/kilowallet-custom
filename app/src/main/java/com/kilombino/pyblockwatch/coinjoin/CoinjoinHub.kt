@@ -279,7 +279,7 @@ object CoinjoinHub {
         val vote = st.voteId ?: ""
         when (e) {
             is PoolSession.Event.Welcomed -> CoinjoinAlerts.follow(ctx, st)
-            is PoolSession.Event.CloseRequested -> if (!e.byMe) CoinjoinAlerts.event(ctx, st.poolId, "close_requested", vote)
+            is PoolSession.Event.CloseRequested -> CoinjoinAlerts.event(ctx, st.poolId, if (e.byMe) "close_asked" else "close_requested", vote)
             is PoolSession.Event.CloseRefused -> CoinjoinAlerts.event(ctx, st.poolId, "close_refused", vote)
             is PoolSession.Event.SignNeeded -> CoinjoinAlerts.event(ctx, st.poolId, "sign_needed")
             is PoolSession.Event.Confirmed -> CoinjoinAlerts.event(ctx, st.poolId, "confirmed")
