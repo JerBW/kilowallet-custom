@@ -71,6 +71,8 @@ import com.kilombino.pyblockwatch.crypto.ScriptType
 import com.kilombino.pyblockwatch.data.AddressRow
 import com.kilombino.pyblockwatch.data.TxConf
 import com.kilombino.pyblockwatch.data.WatchService
+import androidx.lifecycle.withResumed
+import androidx.lifecycle.lifecycleScope
 
 class MainActivity : FragmentActivity() {
 
@@ -283,7 +285,15 @@ class MainActivity : FragmentActivity() {
         }
         vm.setNotificationsEnabled(enable)
         val intent = Intent(this, WatchService::class.java)
-        if (enable) ContextCompat.startForegroundService(this, intent) else stopService(intent)
+        if (!enable) { stopService(intent); return }
+        // Android only lets an app start a foreground service while it is visible: called from
+        // onCreate (the first composition), Android 17 turns it down. Start it once the screen is
+        // resumed, and never let a refusal crash the app; the watcher is started again next time.
+        lifecycleScope.launch {
+            lifecycle.withResumed { }
+            runCatching { ContextCompat.startForegroundService(this@MainActivity, intent) }
+                .onFailure { android.util.Log.w("Kilowallet", "watcher not started: ${it.message}") }
+        }
     }
 }
 
