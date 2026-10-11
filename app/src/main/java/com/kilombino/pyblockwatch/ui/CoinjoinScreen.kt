@@ -123,8 +123,9 @@ fun CoinjoinScreen(vm: WalletViewModel, accent: Color) {
     Panel(accent = accent) {
         SectionLabel("Coinjoin", accent)
         Spacer(Modifier.height(8.dp))
-        Explain("Mix a coin with other people's: everyone puts one coin in and gets back an output of " +
+        Explain("Mix your coins with other people's: everyone puts one or more coins in and gets back an output of " +
             "exactly the pool's amount, all identical, so nobody watching the chain can tell whose is whose. " +
+            "A pool is either native SegWit (bc1q) or Taproot (bc1p), never both, so no coin stands out. " +
             "Each person pays their own share of the fee from their change. No server ever holds your " +
             "coins: the relay only passes encrypted messages, and you sign only after checking your output.")
     }
@@ -232,8 +233,9 @@ fun CoinjoinScreen(vm: WalletViewModel, accent: Color) {
     Panel(accent = accent) {
         SectionLabel("How a round goes", accent)
         Spacer(Modifier.height(8.dp))
-        Explain("1. Someone opens a pool with an amount. 2. People join, each proving they own a real coin " +
-            "(one seat per coin, which stops one person from filling the pool alone). 3. With two or more in, " +
+        Explain("1. Someone opens a pool with an amount and an address type. 2. People join, each proving they own " +
+            "real coins of that type (one seat per person, and a coin can hold only one seat, which stops one person " +
+            "from filling the pool alone). 3. With two or more in, " +
             "anyone can ask to close: the others accept or refuse; whoever does not answer in " +
             "${Protocol.VOTE_SECONDS / 60} minutes is left out. 4. Each wallet posts its mixed output with no name " +
             "on it, after a random wait. 5. Every wallet builds the same transaction, checks its own output and " +
