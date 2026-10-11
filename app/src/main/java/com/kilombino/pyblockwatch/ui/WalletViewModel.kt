@@ -143,6 +143,9 @@ data class UiState(
     val selected: Chain = Chain.BLAKE2B,
     val chains: Map<Chain, ChainState> = Chain.entries.associateWith { ChainState() },
     val notificationsEnabled: Boolean = false,
+    /** Seconds between refreshes while open (0 = by hand) and minutes in the background (0 = off). */
+    val refreshOpenSeconds: Int = 300,
+    val refreshBackgroundMinutes: Int = 15,
     val gapLimit: Int = 20,
     /** When the next foreground refresh is due (ms since the epoch). */
     val nextRefreshAt: Long = 0,
@@ -233,6 +236,8 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
                 // Always open on BTC: the spamchain only after its privacy warning.
                 selected = Chain.BLAKE2B,
                 notificationsEnabled = store.notificationsEnabled,
+                refreshOpenSeconds = store.refreshOpenSeconds,
+                refreshBackgroundMinutes = store.refreshBackgroundMinutes,
                 gapLimit = store.gapLimit,
                 isHot = seedVault.hasSeed() && store.activeWallet != Store.WATCH,
                 hasSeed = seedVault.hasSeed(),
@@ -255,8 +260,8 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * While the app is open, refresh the SELECTED chain every [REFRESH_SECONDS] seconds
-     * with a visible countdown, so the user can see the wallet is live rather than wonder
+     * While the app is open, refresh the SELECTED chain every [Store.refreshOpenSeconds]
+     * (5 minutes by default; never, when set to by hand) with a visible countdown, so the user can see the wallet is live rather than wonder
      * whether it is stuck. Each refresh runs the same notification engine as the background
      * watcher, so a movement seen here fires the same alerts — just far sooner.
      */
@@ -265,10 +270,13 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
         refreshJob = viewModelScope.launch {
             var visibleBefore = true
             while (true) {
-                _state.update { it.copy(nextRefreshAt = System.currentTimeMillis() + REFRESH_SECONDS * 1000L) }
+                val every = store.refreshOpenSeconds
+                // By hand only: no countdown, no automatic look (the ↻ button and pulling down do it).
+                if (every <= 0) { _state.update { it.copy(nextRefreshAt = 0) }; return@launch }
+                _state.update { it.copy(nextRefreshAt = System.currentTimeMillis() + every * 1000L) }
                 // Sleep in short steps so coming back to the app refreshes at once.
                 var waited = 0
-                while (waited < REFRESH_SECONDS * 1000) {
+                while (waited < every * 1000) {
                     delay(1_000); waited += 1_000
                     val visible = com.kilombino.pyblockwatch.ui.AppVisible.value
                     if (visible && !visibleBefore) { visibleBefore = true; break }
@@ -581,6 +589,23 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(notificationsEnabled = enabled) }
     }
 
+    /** How often to refresh while the app is open; 0 = only by hand. */
+    fun setRefreshOpen(seconds: Int) {
+        store.refreshOpenSeconds = seconds
+        _state.update { it.copy(refreshOpenSeconds = seconds) }
+        startRefreshLoop()
+    }
+
+    /** How often the background watcher looks; 0 = off (the screen stops or restarts it). */
+    fun setRefreshBackground(minutes: Int) {
+        store.refreshBackgroundMinutes = minutes
+        _state.update { it.copy(refreshBackgroundMinutes = minutes) }
+    }
+
+    /** The ⏻ switch: background checks off, or back on at the interval they had. */
+    fun toggleBackground() = setRefreshBackground(
+        if (_state.value.refreshBackgroundMinutes > 0) 0 else store.refreshBackgroundLast)
+
     /** Accept a changed certificate — only ever from an explicit user action. */
     fun trustCurrentCertificate(chain: Chain) {
         val st = _state.value.chains[chain] ?: return
@@ -816,6 +841,7 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
             it.copy(
                 xpub = store.xpub, label = store.label, scriptType = store.scriptType,
                 notificationsEnabled = store.notificationsEnabled, gapLimit = store.gapLimit,
+                refreshOpenSeconds = store.refreshOpenSeconds, refreshBackgroundMinutes = store.refreshBackgroundMinutes,
                 isHot = seedVault.hasSeed() && store.activeWallet != Store.WATCH, hasSeed = seedVault.hasSeed(),
                 uiMode = store.uiMode, fiat = store.fiat,
                 taprootXpub = store.taprootXpub.takeIf { seedVault.hasSeed() && store.activeWallet != Store.WATCH },
@@ -1927,7 +1953,6 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
         }
 
         /** Foreground auto-refresh cadence, and the countdown the UI shows. */
-        const val REFRESH_SECONDS = 30
         /** Below this, a change output costs more to spend later than it is worth — fold it into fee. */
         const val DUST_SATS = 294L
     }

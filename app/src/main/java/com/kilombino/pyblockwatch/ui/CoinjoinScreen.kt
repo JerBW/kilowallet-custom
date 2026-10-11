@@ -155,6 +155,7 @@ fun CoinjoinScreen(vm: WalletViewModel, accent: Color) {
                 label = { Text("pool password", style = MaterialTheme.typography.bodySmall) },
                 singleLine = true, textStyle = MaterialTheme.typography.bodyMedium, modifier = Modifier.fillMaxWidth())
         }
+        AutoPanel(accent)
         CoinPicker(vm, accent, "Join · ${groupSats(t.amount)} sats${poolKind(t)}", t.amount, t.feeRate, t.script, t.maxInputs,
             onCancel = { joining = null; joinPassword = "" },
             onPicked = { u ->
@@ -162,7 +163,7 @@ fun CoinjoinScreen(vm: WalletViewModel, accent: Color) {
                 unlockAndPick(activity, vm, u, "Join coinjoin", "Unlock to prove you own the coins",
                     onPick = { pick ->
                         scope.launch {
-                            runCatching { withContext(Dispatchers.Default) { CoinjoinHub.join(ctx, t, pick, joinPassword) } }
+                            runCatching { withContext(Dispatchers.Default) { CoinjoinHub.join(ctx, t, pick, joinPassword, CoinjoinHub.autoDefault(ctx)) } }
                                 .onFailure { message = it.message }
                             joining = null; joinPassword = ""
                         }
@@ -171,11 +172,12 @@ fun CoinjoinScreen(vm: WalletViewModel, accent: Color) {
         return
     }
     if (creating) {
+        AutoPanel(accent)
         CreatePool(vm, accent, testPools, onCancel = { creating = false }) { amount, rate, minPeers, peers, hours, password, maxInputs, u ->
             unlockAndPick(activity, vm, u, "Open a coinjoin pool", "Unlock to put your coins in",
                 onPick = { pick ->
                     scope.launch {
-                        runCatching { withContext(Dispatchers.Default) { CoinjoinHub.create(ctx, pick, amount, rate, peers, hours, minPeers, password, maxInputs) } }
+                        runCatching { withContext(Dispatchers.Default) { CoinjoinHub.create(ctx, pick, amount, rate, peers, hours, minPeers, password, maxInputs, CoinjoinHub.autoDefault(ctx)) } }
                             .onSuccess { creating = false; reloadPools() }
                             .onFailure { message = it.message }
                     }
@@ -533,6 +535,14 @@ private fun MyPoolCard(
             (if (st.seat.changeValue > 0) " + ${groupSats(st.seat.changeValue)} change" else "") +
             " · fee ${groupSats(st.seat.inputValue - st.terms.amount - st.seat.changeValue)}",
             style = MaterialTheme.typography.bodySmall, color = TextFaint)
+        if (CoinjoinHub.isAuto(st.poolId) && st.phase in setOf(PoolSession.Phase.OPEN, PoolSession.Phase.VOTING,
+                PoolSession.Phase.CLOSING, PoolSession.Phase.SIGNING)) Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("On its own: it accepts closing and signs once your outputs check out",
+                style = MaterialTheme.typography.bodySmall, color = Good, modifier = Modifier.weight(1f))
+            TextButton(onClick = { CoinjoinHub.stopAuto(st.poolId); onMessage("This round now asks you at each step.") }) {
+                Text("stop", color = TextSoft, style = MaterialTheme.typography.bodySmall)
+            }
+        }
         Spacer(Modifier.height(8.dp))
 
         @Composable fun btn(label: String, primary: Boolean = false, modifier: Modifier = Modifier, onClick: () -> Unit) = Button(
@@ -634,6 +644,30 @@ private fun MyPoolCard(
             PoolSession.Phase.ABORTED, PoolSession.Phase.REJECTED ->
                 TextButton(onClick = { CoinjoinHub.remove(ctx, st.poolId) }) { Text("remove", color = TextFaint) }
             else -> {}
+        }
+    }
+}
+
+/**
+ * "On its own": one fingerprint when joining and the wallet does the rest of the round (accept
+ * closing, ask to close before it expires, sign once its checks pass). See [CoinjoinHub.isAuto].
+ */
+@Composable
+private fun AutoPanel(accent: Color) {
+    val ctx = LocalContext.current
+    var on by remember { mutableStateOf(CoinjoinHub.autoDefault(ctx)) }
+    Panel(accent = accent) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Run the round on its own", style = MaterialTheme.typography.bodyMedium, color = TextMain)
+                Explain(if (on) "One fingerprint now, nothing more: the wallet accepts closing, asks to close before the " +
+                    "pool expires, and signs once it has checked that the transaction pays your exact output and your " +
+                    "change. If anything is off it does not sign. The keys of these coins stay in memory only, until " +
+                    "the round ends; if the phone closes the app, it asks you again."
+                    else "Off: you accept closing and sign yourself, with your fingerprint, at each step.")
+            }
+            androidx.compose.material3.Switch(checked = on, onCheckedChange = { on = it; CoinjoinHub.setAutoDefault(ctx, it) },
+                colors = androidx.compose.material3.SwitchDefaults.colors(checkedThumbColor = accent))
         }
     }
 }

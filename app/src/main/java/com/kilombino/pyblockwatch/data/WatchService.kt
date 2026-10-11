@@ -26,10 +26,11 @@ import kotlinx.coroutines.launch
  * server itself. Nothing about this wallet leaves the device except the scripthash
  * queries the wallet already makes.
  *
- * The cost is honesty about battery: this is a visible foreground service on a
- * 5-minute loop, not a free push wake-up. The user opts in and can see it running.
- * While the app is open, the foreground refresh (every 30 s, [WalletViewModel]) drives
- * the same [BalanceWatch] engine, so movements are caught far faster than 5 minutes then.
+ * The cost is honesty about battery: this is a visible foreground service on a loop of
+ * [Store.refreshBackgroundMinutes] (15 by default), not a free push wake-up. The user can
+ * set it, or turn it off and with it the persistent notification. While the app is open,
+ * the foreground refresh ([Store.refreshOpenSeconds], [WalletViewModel]) drives the same
+ * [BalanceWatch] engine.
  */
 class WatchService : Service() {
 
@@ -54,7 +55,7 @@ class WatchService : Service() {
         val store = Store(this)
         val scanner = Scanner()
         while (scope.isActive) {
-            if (!store.notificationsEnabled) { delay(INTERVAL_MS); continue }
+            if (!store.notificationsEnabled || store.refreshBackgroundMinutes <= 0) { stopSelf(); return }
 
             // Both wallets are watched: the hot one and, if set up, the separate watch-only one.
             // The watch-only one's notifications say so in their title.
@@ -120,7 +121,7 @@ class WatchService : Service() {
                     com.kilombino.pyblockwatch.widget.XbtWidget.renderAll(this@WatchService)
                 }
             }
-            delay(INTERVAL_MS)
+            delay(store.refreshBackgroundMinutes.coerceAtLeast(1) * 60_000L)
         }
     }
 
@@ -158,7 +159,7 @@ class WatchService : Service() {
         return Notification.Builder(this, Notifier.CHANNEL_ONGOING)
             .setSmallIcon(android.R.drawable.stat_notify_sync)
             .setContentTitle("Watching your balances")
-            .setContentText("Checks every 5 min · no push server")
+            .setContentText("Checks every ${Store(this).refreshBackgroundMinutes} min · no push server")
             .setOngoing(true)
             .setContentIntent(openApp())
             .build()
@@ -173,6 +174,5 @@ class WatchService : Service() {
 
     private companion object {
         const val ONGOING_ID = 1
-        const val INTERVAL_MS = 5 * 60 * 1000L
     }
 }

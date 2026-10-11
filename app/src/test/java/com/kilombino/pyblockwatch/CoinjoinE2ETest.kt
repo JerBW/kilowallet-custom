@@ -112,6 +112,48 @@ class CoinjoinE2ETest {
         a.stop(); b.stop()
     }
 
+    /**
+     * "On its own": B asks to close and from then on nobody touches anything: A accepts by
+     * itself and both sign by themselves once their checks pass; the round is broadcast and
+     * mined. KILOJOIN_E2E_AUTO=<coins file> with two funded native SegWit coins (seeds any).
+     */
+    @Test fun runsOnItsOwn() {
+        val path = System.getenv("KILOJOIN_E2E_AUTO") ?: return
+        Protocol.NETWORK = "blake2b-regtest"
+        val rows = java.io.File(path).readLines().filter { it.isNotBlank() }.map { it.trim().split(" ") }
+        val coins = rows.map { (seed, txid, vout, value) -> seed.toInt() to CoinjoinTx.Coin(txid, vout.toInt(), value.toLong(), pub(key(seed.toInt()))) }
+        val (seedA, coinA) = coins[0]; val (seedB, coinB) = coins[1]
+        val salt = System.nanoTime() % 1_000_000
+
+        val (terms, secret) = PoolSession.newPool(100_000, 2.0, 5, 1)
+        val envA = Env("A"); val envB = Env("B")
+        val a = PoolSession(envA, PoolSession.newState(terms, true, secret, coinA, key(seedA), "m/test/a",
+            script(72_000 + salt), script(82_000 + salt)))
+        a.autoKeys = listOf(key(seedA))
+        a.start(); waitFor("A open") { a.state.phase == PoolSession.Phase.OPEN }
+
+        val found = java.util.concurrent.CompletableFuture<Protocol.Terms>()
+        val r = RelayClient(Protocol.RELAY, { _, ev -> Protocol.Terms.parse(ev)?.let { if (it.id == terms.id) found.complete(it) } })
+        r.connect(); r.subscribe("p", listOf(JSONObject().put("kinds", JSONArray().put(Protocol.KIND_POOL)).put("#d", JSONArray().put(terms.id))))
+        val seen = found.get(30, java.util.concurrent.TimeUnit.SECONDS); r.close()
+
+        val b = PoolSession(envB, PoolSession.newState(seen, false, null, coinB, key(seedB), "m/test/b",
+            script(73_000 + salt), script(83_000 + salt)))
+        b.autoKeys = listOf(key(seedB))
+        b.start(); waitFor("B welcomed") { b.state.phase == PoolSession.Phase.OPEN && b.state.seats.size == 2 }
+        waitFor("A sees two") { a.state.seats.size == 2 }
+
+        b.requestClose()   // the one tap; everything after it happens alone
+        waitFor("broadcast", 240) { a.state.txid != null && b.state.txid != null }
+        assertEquals(a.state.txid, b.state.txid)
+        org.junit.Assert.assertTrue(envA.events.contains("DidAlone") && envB.events.contains("DidAlone"))
+        org.junit.Assert.assertFalse(envA.events.contains("SignNeeded") || envB.events.contains("SignNeeded"))
+        rpc("generatetoaddress", 1, rpc("getnewaddress") as String)
+        waitFor("confirmed", 60) { a.state.phase == PoolSession.Phase.CONFIRMED && b.state.phase == PoolSession.Phase.CONFIRMED }
+        println("on its own txid ${a.state.txid}")
+        a.stop(); b.stop()
+    }
+
     private fun waitFor(what: String, seconds: Int = 120, cond: () -> Boolean) {
         val end = System.currentTimeMillis() + seconds * 1000L
         while (!cond()) { require(System.currentTimeMillis() < end) { "timed out waiting for $what" }; Thread.sleep(500) }

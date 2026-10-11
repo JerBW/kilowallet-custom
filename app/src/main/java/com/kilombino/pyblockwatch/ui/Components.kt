@@ -34,6 +34,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -214,6 +215,62 @@ fun AboutDialog(onClose: () -> Unit) {
             }
         },
         confirmButton = { androidx.compose.material3.TextButton(onClick = onClose) { Text("CLOSE", color = TextSoft) } },
+        containerColor = PanelBg, titleContentColor = TextMain, textContentColor = TextSoft,
+    )
+}
+
+/** The power symbol, drawn: the fonts on many phones have no ⏻. */
+@Composable
+private fun PowerGlyph(color: Color) {
+    androidx.compose.foundation.Canvas(Modifier.size(14.dp)) {
+        val w = size.width; val stroke = w * 0.13f
+        drawArc(color, startAngle = -60f, sweepAngle = 300f, useCenter = false,
+            topLeft = Offset(stroke / 2, stroke / 2 + w * 0.06f), size = Size(w - stroke, w - stroke),
+            style = Stroke(stroke, cap = androidx.compose.ui.graphics.StrokeCap.Round))
+        drawLine(color, Offset(w / 2, 0f), Offset(w / 2, w * 0.45f), stroke, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+    }
+}
+
+/** The balance card's countdown: "↻ 4:59", or "↻ by hand" when automatic refresh is off. */
+fun refreshCountdown(nextRefreshAt: Long, seconds: Int): String =
+    if (nextRefreshAt <= 0L) "↻ by hand"
+    else if (seconds >= 60) "↻ %d:%02d".format(seconds / 60, seconds % 60) else "↻ ${seconds}s"
+
+/**
+ * Next to the logo: ↻ looks now (it spins while it does), and ⏻ shows whether the wallet checks
+ * in the background. Turning that off asks first, since incoming payments then go unannounced
+ * until the app is opened; turning it on again is one tap.
+ */
+@Composable
+fun RefreshControls(spinning: Boolean, backgroundOn: Boolean, showPower: Boolean, accent: Color,
+                    onRefresh: () -> Unit, onPower: () -> Unit) {
+    var askOff by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    val spin = rememberInfiniteTransition(label = "refresh")
+    val angle by spin.animateFloat(0f, 360f, infiniteRepeatable(tween(900, easing = LinearEasing)), label = "angle")
+    // Stacked, so the header row keeps its width on a narrow phone.
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(Modifier.size(26.dp).clip(androidx.compose.foundation.shape.CircleShape).clickable(enabled = !spinning) { onRefresh() },
+            contentAlignment = Alignment.Center) {
+            Text("↻", style = MaterialTheme.typography.titleMedium, color = if (spinning) accent else TextSoft,
+                 modifier = if (spinning) Modifier.graphicsLayer { rotationZ = angle } else Modifier)
+        }
+        if (showPower) Box(Modifier.size(26.dp).clip(androidx.compose.foundation.shape.CircleShape)
+                .clickable { if (backgroundOn) askOff = true else onPower() },
+            contentAlignment = Alignment.Center) {
+            PowerGlyph(if (backgroundOn) Good else TextFaint)
+        }
+    }
+    if (askOff) androidx.compose.material3.AlertDialog(
+        onDismissRequest = { askOff = false },
+        title = { Text("Stop background checks?") },
+        text = {
+            Text("With the app closed it will no longer look at your balances: no alerts for incoming " +
+                "payments, no persistent notification and no battery used until you open it again. " +
+                "If you use Ark, open the app at least once a month so your Ark coins are renewed. " +
+                "Tap the power button again to turn it back on.", style = MaterialTheme.typography.bodySmall)
+        },
+        confirmButton = { androidx.compose.material3.TextButton(onClick = { askOff = false; onPower() }) { Text("STOP", color = accent) } },
+        dismissButton = { androidx.compose.material3.TextButton(onClick = { askOff = false }) { Text("CANCEL", color = TextSoft) } },
         containerColor = PanelBg, titleContentColor = TextMain, textContentColor = TextSoft,
     )
 }

@@ -205,6 +205,26 @@ class Store(context: Context, private val profile: String = HOT) {
         get() = prefs.getBoolean(KEY_NOTIFY, true)
         set(v) = prefs.edit().putBoolean(KEY_NOTIFY, v).apply()
 
+    /** Seconds between refreshes while the app is on screen; 0 = only by hand. */
+    var refreshOpenSeconds: Int
+        get() = prefs.getInt("refresh_open_s", 300)
+        set(v) = prefs.edit().putInt("refresh_open_s", v).apply()
+
+    /**
+     * Minutes between checks with the app closed; 0 = off: no watcher, no persistent
+     * notification, no battery used while closed.
+     */
+    var refreshBackgroundMinutes: Int
+        get() = prefs.getInt("refresh_bg_min", 15)
+        set(v) {
+            val e = prefs.edit().putInt("refresh_bg_min", v)
+            if (v > 0) e.putInt("refresh_bg_last", v)
+            e.apply()
+        }
+
+    /** The background interval to go back to when the ⏻ switch turns it on again. */
+    val refreshBackgroundLast: Int get() = prefs.getInt("refresh_bg_last", 15)
+
     /**
      * Which address type to derive from the xpub. Defaults to native SegWit (BIP-84,
      * m/84'/0'/0', bc1q); the user can switch to Nested (BIP-49), Legacy (BIP-44) or

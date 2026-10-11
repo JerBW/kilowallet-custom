@@ -30,6 +30,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -114,8 +115,13 @@ class MainActivity : FragmentActivity() {
                 val state by vm.state.collectAsState()
                 // Notifications are on by default: start the watcher (and ask for the
                 // POST_NOTIFICATIONS permission on Android 13+) as soon as there is a wallet.
-                LaunchedEffect(state.hasWallet, state.notificationsEnabled) {
-                    if (state.hasWallet && state.notificationsEnabled) toggleNotifications(vm, true)
+                // With background checks off (⏻ or settings) the watcher, and its persistent
+                // notification, stop; a change of interval restarts it so it takes effect now.
+                LaunchedEffect(state.hasWallet, state.notificationsEnabled, state.refreshBackgroundMinutes) {
+                    if (state.hasWallet && state.notificationsEnabled) {
+                        stopService(Intent(this@MainActivity, WatchService::class.java))
+                        if (state.refreshBackgroundMinutes > 0) toggleNotifications(vm, true)
+                    }
                 }
                 // ARK and COINJOIN live in advanced mode: a notification about them switches to it.
                 val openTab by com.kilombino.pyblockwatch.data.OpenTab.flow.collectAsState()
@@ -327,7 +333,7 @@ private fun OnboardingScreen(state: UiState, vm: WalletViewModel) {
     }
 
     Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
+        Modifier.fillMaxSize().imePadding().verticalScroll(rememberScrollState()).padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Spacer(Modifier.height(40.dp))
@@ -506,32 +512,34 @@ private fun WalletScreen(state: UiState, vm: WalletViewModel, onToggleNotificati
     // Pull down to refresh the selected chain, as in simple mode.
     var refreshing by remember { mutableStateOf(false) }
     val pullScope = rememberCoroutineScope()
+    // Pulling down and the ↻ button next to the logo do the same.
+    val doRefresh: () -> Unit = {
+        pullScope.launch {
+            refreshing = true
+            // The node reminder belongs to the BTC tab only, not to ARK or COINJOIN.
+            if (!arkTab && !cjTab) {
+                if (chain == Chain.SHA256 && !vm.hasOwnNode(Chain.SHA256)) warnSpamRefresh = true
+                else if (chain == Chain.BLAKE2B && !vm.hasOwnNode(Chain.BLAKE2B)) remindNode = true
+            }
+            if (cjTab) com.kilombino.pyblockwatch.coinjoin.CoinjoinHub.requestRefresh()
+            else if (arkTab) arkPull++ else if (!warnSpamRefresh) vm.refresh(chain)
+            kotlinx.coroutines.delay(1_500)
+            // On the BTC tabs the spinner stays until the refresh ends (a minute at most).
+            if (!cjTab && !arkTab) {
+                var waited = 0
+                while (vm.isRefreshing(chain) && waited < 60) { kotlinx.coroutines.delay(1_000); waited++ }
+            }
+            refreshing = false
+        }
+    }
     @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
     androidx.compose.material3.pulltorefresh.PullToRefreshBox(
         isRefreshing = refreshing,
-        onRefresh = {
-            pullScope.launch {
-                refreshing = true
-                // The node reminder belongs to the BTC tab only, not to ARK or COINJOIN.
-                if (!arkTab && !cjTab) {
-                    if (chain == Chain.SHA256 && !vm.hasOwnNode(Chain.SHA256)) warnSpamRefresh = true
-                    else if (chain == Chain.BLAKE2B && !vm.hasOwnNode(Chain.BLAKE2B)) remindNode = true
-                }
-                if (cjTab) com.kilombino.pyblockwatch.coinjoin.CoinjoinHub.requestRefresh()
-                else if (arkTab) arkPull++ else if (!warnSpamRefresh) vm.refresh(chain)
-                kotlinx.coroutines.delay(1_500)
-                // On the BTC tabs the spinner stays until the refresh ends (a minute at most).
-                if (!cjTab && !arkTab) {
-                    var waited = 0
-                    while (vm.isRefreshing(chain) && waited < 60) { kotlinx.coroutines.delay(1_000); waited++ }
-                }
-                refreshing = false
-            }
-        },
+        onRefresh = doRefresh,
         modifier = Modifier.fillMaxSize(),
     ) {
     Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+        Modifier.fillMaxSize().imePadding().verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         Spacer(Modifier.height(28.dp))
@@ -539,14 +547,17 @@ private fun WalletScreen(state: UiState, vm: WalletViewModel, onToggleNotificati
         Row(verticalAlignment = Alignment.CenterVertically) {
             WalletModeSwitch(state, vm, accent)
             Spacer(Modifier.weight(1f))
-            TextButton(onClick = { vm.setUiMode("simple") }) {
+            TextButton(onClick = { vm.setUiMode("simple") }, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp)) {
                 Text("simple", style = MaterialTheme.typography.bodySmall, color = TextSoft)
             }
-            TextButton(onClick = { showSettings = !showSettings }) {
+            TextButton(onClick = { showSettings = !showSettings }, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp)) {
                 Text(if (showSettings) "close" else "settings",
                      style = MaterialTheme.typography.bodySmall, color = TextSoft)
             }
-            AppLogo()
+            RefreshControls(refreshing, state.refreshBackgroundMinutes > 0, state.notificationsEnabled, accent,
+                onRefresh = doRefresh, onPower = { vm.toggleBackground() })
+            Spacer(Modifier.width(4.dp))
+            AppLogo(34)
         }
 
         // A watch-only wallet stays that: no Ark, no coinjoin (it cannot sign).
@@ -693,7 +704,7 @@ private fun BalanceCard(
             StreetEye(TextSoft)
             // A visible countdown to the next auto-refresh, so the wallet reads as live.
             if (cs.phase is ScanPhase.Complete) {
-                Text("↻ ${secondsUntilRefresh}s", style = MaterialTheme.typography.bodySmall,
+                Text(refreshCountdown(nextRefreshAt, secondsUntilRefresh), style = MaterialTheme.typography.bodySmall,
                      color = TextFaint)
                 Spacer(Modifier.width(8.dp))
                 PulseDot(Good, 7)
@@ -908,14 +919,35 @@ internal fun SettingsPanel(
             Column(Modifier.weight(1f)) {
                 Text("Tell me when the balance changes",
                      style = MaterialTheme.typography.bodyMedium, color = TextMain)
-                Explain("A service checks the already-discovered addresses every 15 minutes. " +
-                    "No push server, no Google: your phone does the lookup itself.")
+                Explain(if (state.refreshBackgroundMinutes > 0)
+                    "With the app closed, a service checks the addresses already found every " +
+                    "${state.refreshBackgroundMinutes} minutes. No push server, no Google: your phone does the lookup itself."
+                    else "Background checks are off: alerts only while the app is open.")
             }
             Switch(
                 checked = state.notificationsEnabled,
                 onCheckedChange = onToggleNotifications,
                 colors = SwitchDefaults.colors(checkedThumbColor = accent),
             )
+        }
+
+        // How often to look: on screen, and with the app closed (off = no watcher, no
+        // persistent notification, no battery while closed).
+        Spacer(Modifier.height(10.dp))
+        Text("Refresh", style = MaterialTheme.typography.bodyMedium, color = TextMain)
+        Explain("While the app is open")
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            listOf(30 to "30 s", 60 to "1 min", 300 to "5 min", 0 to "by hand").forEach { (v, l) ->
+                FiatChip(l, state.refreshOpenSeconds == v, accent) { vm.setRefreshOpen(v) }
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        Explain("In the background, with the app closed")
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            listOf(0 to "off", 5 to "5", 10 to "10", 15 to "15", 30 to "30", 60 to "60").forEach { (v, l) ->
+                FiatChip(l, state.refreshBackgroundMinutes == v, accent) { vm.setRefreshBackground(v) }
+            }
+            Text("min", style = MaterialTheme.typography.bodySmall, color = TextFaint, modifier = Modifier.align(Alignment.CenterVertically))
         }
 
         // Optional features (spending wallet only), and the full backup file.
@@ -949,7 +981,7 @@ internal fun SettingsPanel(
             if (cjOn) Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("Notify open coinjoin pools", style = MaterialTheme.typography.bodyMedium, color = TextMain)
-                    Explain("Checked every 5 minutes with the balance watcher. Your own rounds always notify.")
+                    Explain(if (state.refreshBackgroundMinutes > 0) "Checked every ${state.refreshBackgroundMinutes} minutes with the balance watcher. Your own rounds always notify." else "Only while the app is open (background checks are off). Your own rounds always notify.")
                 }
                 val askNotif = rememberNotificationPermission()
                 Switch(checked = cjNotify, onCheckedChange = { cjNotify = it; vm.setCoinjoinNotify(it); if (it) askNotif() },

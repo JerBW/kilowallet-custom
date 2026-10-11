@@ -127,8 +127,31 @@ object CoinjoinHub {
         fun txCoins(): List<CoinjoinTx.Coin> = coins.map { CoinjoinTx.Coin(it.txid, it.vout, it.value, it.coinKey.publicKey(), type) }
     }
 
-    private fun add(ctx: Context, st: PoolSession.State): PoolSession {
+    // ------------------------------------------------------------------------------- on its own
+
+    /**
+     * Pools that run on their own: the keys of OUR coins in them, unlocked once at join and kept
+     * in memory only (never written anywhere) until the round ends. With them the wallet accepts
+     * a request to close, asks to close itself when the pool is about to expire with enough
+     * people, and signs, always after [PoolSession] has checked that the transaction pays our
+     * exact output and our change at our fee share (it refuses to sign otherwise). If the app is
+     * killed the keys are gone and the round asks for the fingerprint as before.
+     */
+    fun isAuto(poolId: String): Boolean = session(poolId)?.autoKeys != null
+
+    /** Whether new pools run on their own; on unless the user turned it off. */
+    fun autoDefault(ctx: Context): Boolean =
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean("cj_auto", true)
+
+    fun setAutoDefault(ctx: Context, on: Boolean) =
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean("cj_auto", on).apply()
+
+    /** Stop running [poolId] on its own: its keys are dropped, and the next steps ask again. */
+    fun stopAuto(poolId: String) { session(poolId)?.autoKeys = null; _version.value++ }
+
+    private fun add(ctx: Context, st: PoolSession.State, keys: List<java.math.BigInteger>? = null): PoolSession {
         val s = PoolSession(env(ctx, st), st)
+        s.autoKeys = keys
         synchronized(this) { sessions[st.poolId] = s }
         persist(ctx)
         CoinjoinService.start(ctx)
@@ -138,22 +161,22 @@ object CoinjoinHub {
     /** Open a new pool with our coin as the first seat. */
     fun create(
         ctx: Context, pick: Pick, amount: Long, feeRate: Double, maxPeers: Int, hours: Int,
-        minPeers: Int = Protocol.MIN_PEERS, password: String? = null, maxInputs: Int = 1,
+        minPeers: Int = Protocol.MIN_PEERS, password: String? = null, maxInputs: Int = 1, auto: Boolean = false,
     ): PoolSession.State {
         val (terms, secret) = PoolSession.newPool(amount, feeRate, maxPeers, hours, minPeers, !password.isNullOrEmpty(),
             pick.type, maxInputs)
         val st = PoolSession.newState(terms, true, secret, pick.txCoins(), pick.coins.map { it.coinKey.key }, pick.coins.map { it.coinPath },
             pick.mixScript, pick.changeScript, password?.ifEmpty { null })
-        add(ctx, st)
+        add(ctx, st, if (auto) pick.coins.map { it.coinKey.key } else null)
         CoinjoinAlerts.follow(ctx, st)
         return st
     }
 
-    fun join(ctx: Context, terms: Protocol.Terms, pick: Pick, password: String? = null): PoolSession.State {
+    fun join(ctx: Context, terms: Protocol.Terms, pick: Pick, password: String? = null, auto: Boolean = false): PoolSession.State {
         require(pick.type == terms.script) { "these coins are not of the pool's address type" }
         val st = PoolSession.newState(terms, false, null, pick.txCoins(), pick.coins.map { it.coinKey.key }, pick.coins.map { it.coinPath },
             pick.mixScript, pick.changeScript, password?.ifEmpty { null })
-        add(ctx, st)
+        add(ctx, st, if (auto) pick.coins.map { it.coinKey.key } else null)
         return st
     }
 
@@ -264,10 +287,19 @@ object CoinjoinHub {
             is PoolSession.Event.Welcomed -> notify(ctx, id, "Coinjoin: you are in", "$pool · waiting for more people")
             is PoolSession.Event.Rejected -> notify(ctx, id, "Coinjoin: join refused", e.reason)
             is PoolSession.Event.Joined -> notify(ctx, id, "Coinjoin: someone joined", "$pool · ${e.peers}/${st.terms.maxPeers} people")
-            is PoolSession.Event.CloseRequested -> if (!e.byMe)
+            is PoolSession.Event.CloseRequested -> if (!e.byMe && !isAuto(st.poolId))
                 notify(ctx, id, "Coinjoin: close now?", "$pool · ${e.peers} people. Open the app to accept or refuse.")
             is PoolSession.Event.CloseRefused -> notify(ctx, id, "Coinjoin: stays open", "$pool · someone said no")
             is PoolSession.Event.Closing -> notify(ctx, id, "Coinjoin: closing", "$pool · ${e.peers} people, collecting outputs")
+            is PoolSession.Event.DidAlone -> notify(ctx, id, when (e.what) {
+                PoolSession.Alone.ACCEPTED -> "Coinjoin: closing"
+                PoolSession.Alone.ASKED_TO_CLOSE -> "Coinjoin: asking to close"
+                PoolSession.Alone.SIGNED -> "Coinjoin: signed on its own"
+            }, when (e.what) {
+                PoolSession.Alone.ACCEPTED -> "$pool · accepted on its own"
+                PoolSession.Alone.ASKED_TO_CLOSE -> "$pool · enough people and under an hour left: asked on its own"
+                PoolSession.Alone.SIGNED -> "$pool · your output and change checked out"
+            })
             is PoolSession.Event.SignNeeded -> notify(ctx, id, "Coinjoin: sign now",
                 "$pool · the transaction is ready. Open the app and sign within ${Protocol.SIGN_SECONDS / 60} min.")
             is PoolSession.Event.Broadcast -> notify(ctx, id, "Coinjoin sent", "$pool · ${e.txid.take(16)}…")

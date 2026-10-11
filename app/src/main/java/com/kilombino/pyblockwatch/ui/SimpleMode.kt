@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -75,7 +76,7 @@ import java.util.Locale
 @Composable
 fun ModeChooser(vm: WalletViewModel) {
     Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
+        Modifier.fillMaxSize().imePadding().verticalScroll(rememberScrollState()).padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Spacer(Modifier.height(36.dp))
@@ -159,27 +160,29 @@ fun SimpleScreen(state: UiState, vm: WalletViewModel, onToggleNotifications: (Bo
     // Pull down to refresh the balance and the price.
     var refreshing by remember { mutableStateOf(false) }
     val pullScope = rememberCoroutineScope()
+    // Pulling down and the ↻ button next to the logo do the same.
+    val doRefresh: () -> Unit = {
+        pullScope.launch {
+            refreshing = true
+            // A manual refresh is when to remind about using your own node.
+            if (chain == Chain.SHA256 && !vm.hasOwnNode(Chain.SHA256)) warnSpam = true
+            else if (chain == Chain.BLAKE2B && !vm.hasOwnNode(Chain.BLAKE2B)) remindNode = true
+            if (!warnSpam) vm.refresh(chain)
+            vm.refreshMarket(force = true)
+            kotlinx.coroutines.delay(1_500)
+            var waited = 0
+            while (vm.isRefreshing(chain) && waited < 60) { kotlinx.coroutines.delay(1_000); waited++ }
+            refreshing = false
+        }
+    }
     @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
     androidx.compose.material3.pulltorefresh.PullToRefreshBox(
         isRefreshing = refreshing,
-        onRefresh = {
-            pullScope.launch {
-                refreshing = true
-                // A manual refresh is when to remind about using your own node.
-                if (chain == Chain.SHA256 && !vm.hasOwnNode(Chain.SHA256)) warnSpam = true
-                else if (chain == Chain.BLAKE2B && !vm.hasOwnNode(Chain.BLAKE2B)) remindNode = true
-                if (!warnSpam) vm.refresh(chain)
-                vm.refreshMarket(force = true)
-                kotlinx.coroutines.delay(1_500)
-                var waited = 0
-                while (vm.isRefreshing(chain) && waited < 60) { kotlinx.coroutines.delay(1_000); waited++ }
-                refreshing = false
-            }
-        },
+        onRefresh = doRefresh,
         modifier = Modifier.fillMaxSize(),
     ) {
     Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+        Modifier.fillMaxSize().imePadding().verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         Spacer(Modifier.height(28.dp))
@@ -187,13 +190,16 @@ fun SimpleScreen(state: UiState, vm: WalletViewModel, onToggleNotifications: (Bo
         Row(verticalAlignment = Alignment.CenterVertically) {
             WalletModeSwitch(state, vm, accent)
             Spacer(Modifier.weight(1f))
-            TextButton(onClick = { showSettings = !showSettings }) {
+            TextButton(onClick = { showSettings = !showSettings }, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp)) {
                 Text(if (showSettings) "close" else "settings", style = MaterialTheme.typography.bodySmall, color = TextSoft)
             }
-            TextButton(onClick = { vm.setUiMode("advanced") }) {
+            TextButton(onClick = { vm.setUiMode("advanced") }, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp)) {
                 Text("advanced", style = MaterialTheme.typography.bodySmall, color = TextSoft)
             }
-            AppLogo()
+            RefreshControls(refreshing, state.refreshBackgroundMinutes > 0, state.notificationsEnabled, accent,
+                onRefresh = doRefresh, onPower = { vm.toggleBackground() })
+            Spacer(Modifier.width(4.dp))
+            AppLogo(34)
         }
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -312,7 +318,7 @@ private fun SimpleBalance(
             Spacer(Modifier.weight(1f))
             StreetEye(TextSoft)
             if (cs.phase is ScanPhase.Complete) {
-                Text("↻ ${secondsUntilRefresh}s", style = MaterialTheme.typography.bodySmall, color = TextFaint)
+                Text(refreshCountdown(nextRefreshAt, secondsUntilRefresh), style = MaterialTheme.typography.bodySmall, color = TextFaint)
                 Spacer(Modifier.width(8.dp))
                 PulseDot(Good, 7)
             }

@@ -35,6 +35,8 @@ class PoolSession(private val env: Env, private val s: State) {
         fun log(msg: String) {}
     }
 
+    enum class Alone { ACCEPTED, ASKED_TO_CLOSE, SIGNED }
+
     sealed class Event(val pool: String) {
         class Joined(pool: String, val peers: Int) : Event(pool)
         class Welcomed(pool: String) : Event(pool)
@@ -43,6 +45,8 @@ class PoolSession(private val env: Env, private val s: State) {
         class CloseRefused(pool: String) : Event(pool)
         class Closing(pool: String, val peers: Int) : Event(pool)
         class SignNeeded(pool: String, val peers: Int) : Event(pool)
+        /** Run on its own: we accepted a close, asked to close, or signed, without the user. */
+        class DidAlone(pool: String, val what: Alone) : Event(pool)
         class Broadcast(pool: String, val txid: String) : Event(pool)
         class Confirmed(pool: String, val txid: String) : Event(pool)
         class Aborted(pool: String, val reason: String) : Event(pool)
@@ -165,6 +169,17 @@ class PoolSession(private val env: Env, private val s: State) {
     private val terms = s.terms
 
     val state: State get() = s
+
+    /**
+     * "On its own": the keys of our coins, unlocked once at join and kept in memory only (never in
+     * [State], never saved). With them this session accepts a request to close, asks to close
+     * itself when the pool is about to expire with enough people, and signs as soon as the
+     * transaction passes the same checks a person signing would rely on ([CoinjoinTx.checkOurs]:
+     * our exact output, our change, our fee share). A failed check, or keys that do not sign,
+     * drop them and fall back to asking. Lost with the process, so a restarted app asks again.
+     */
+    @Volatile var autoKeys: List<BigInteger>? = null
+        set(v) { require(v == null || v.size == s.seat.coins.size) { "one key per coin is needed" }; field = v }
     val done: Boolean get() = s.phase in setOf(Phase.CONFIRMED, Phase.ABORTED, Phase.REJECTED)
 
     /** The plan once every output is in; null before. */
@@ -443,6 +458,9 @@ class PoolSession(private val env: Env, private val s: State) {
                 s.accepts.clear(); s.accepts.add(th)
                 save()
                 env.event(Event.CloseRequested(s.poolId, s.seats.size, th == myTokenHash))
+                if (autoKeys != null && th != myTokenHash) {
+                    runCatching { vote(true) }.onSuccess { env.event(Event.DidAlone(s.poolId, Alone.ACCEPTED)) }
+                }
                 if (s.creator && s.seats.all { it.tokenHash in s.accepts }) callClosing(s.seats.toList(), "agreed")
             }
             "vote" -> if (s.creator) {
@@ -464,6 +482,8 @@ class PoolSession(private val env: Env, private val s: State) {
                 s.round = seats.toMutableList(); s.phase = Phase.CLOSING
                 s.phaseDeadline = o.optLong("deadline", at + Protocol.OUTPUTS_SECONDS)
                 save()
+                // The public listing follows the round: "closing" now, "done" once it is out.
+                if (s.creator) announce()
                 env.event(Event.Closing(s.poolId, seats.size))
                 scheduleOutput()
             }
@@ -493,6 +513,8 @@ class PoolSession(private val env: Env, private val s: State) {
                 val txid = o.getString("txid")
                 if (txid != CoinjoinTx.txid(plan)) return
                 s.txid = txid; s.phase = Phase.BROADCAST; save()
+                // Another wallet sent it: the creator still tells the listing the round is done.
+                if (s.creator) announce()
                 env.event(Event.Broadcast(s.poolId, txid))
             }
             "leave" -> if (s.creator && s.phase in setOf(Phase.OPEN, Phase.VOTING)) {
@@ -543,6 +565,11 @@ class PoolSession(private val env: Env, private val s: State) {
         val change = s.seat.changeScript?.let { TxBuilder.Output(it, s.seat.changeValue) }
         CoinjoinTx.checkOurs(plan, s.mixScript, change, terms.amount, terms.feeRate, s.round.map { it.coins.size })?.let { return abort(it) }
         s.phase = Phase.SIGNING; s.phaseDeadline = env.now() + Protocol.SIGN_SECONDS; save()
+        autoKeys?.let { keys ->
+            runCatching { sign(keys) }
+                .onSuccess { env.event(Event.DidAlone(s.poolId, Alone.SIGNED)); return }
+                .onFailure { autoKeys = null; env.log("did not sign on its own: ${it.message}") }
+        }
         env.event(Event.SignNeeded(s.poolId, plan.coins.size))
     }
 
@@ -636,7 +663,8 @@ class PoolSession(private val env: Env, private val s: State) {
                     terms.expiresAt - now <= EXPIRY_WARN_SECONDS && s.seats.size >= terms.minPeers && s.seats.size < terms.maxPeers) {
                     // A last call: enough people to mix, and the pool is about to expire for nothing.
                     s.warnedExpiry = true; save()
-                    env.event(Event.ExpiringSoon(s.poolId, s.seats.size, ((terms.expiresAt - now) / 60).toInt().coerceAtLeast(1)))
+                    if (autoKeys != null && runCatching { requestClose() }.isSuccess) env.event(Event.DidAlone(s.poolId, Alone.ASKED_TO_CLOSE))
+                    else env.event(Event.ExpiringSoon(s.poolId, s.seats.size, ((terms.expiresAt - now) / 60).toInt().coerceAtLeast(1)))
                 } else if (now > terms.expiresAt) {
                     if (s.creator) abort("the pool expired") else { s.phase = Phase.ABORTED; s.reason = "the pool expired"; save(); env.event(Event.Aborted(s.poolId, s.reason)) }
                 } else if (s.phase == Phase.JOINING && !s.creator && now - s.created > JOIN_TIMEOUT) {
