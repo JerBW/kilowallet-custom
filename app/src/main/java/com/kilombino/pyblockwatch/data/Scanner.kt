@@ -108,7 +108,6 @@ class Scanner(
         val rows = mutableListOf<AddressRow>()
         try {
             val height = client.blockHeight()
-            android.util.Log.i("Kilowallet", "scan timing: connected in ${System.currentTimeMillis() - t0} ms")
             emit(ScanEvent.Connected(
                 client.serverVersion ?: "unknown", height,
                 client.serverFingerprint, client.fingerprintChanged,
