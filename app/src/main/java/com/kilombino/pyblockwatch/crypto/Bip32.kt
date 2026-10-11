@@ -87,7 +87,7 @@ object Bip32 {
         // BIP-32 says: if IL ≥ n, or the result is the point at infinity, skip this
         // index. Astronomically unlikely, but the spec is explicit about it.
         require(il < Secp256k1.N) { "derived scalar out of range at index $index" }
-        val child = Secp256k1.add(Secp256k1.multiply(il, Secp256k1.G), parent.point)
+        val child = Secp256k1.add(Secp256k1.multiplyG(il), parent.point)
         require(!child.isInfinity) { "derived point at infinity at index $index" }
 
         return ExtendedPubKey(child, ir, parent.depth + 1, parent.scriptType)

@@ -72,7 +72,7 @@ object Address {
         val xOnly = pubkey.copyOfRange(1, 33)               // drop the compressed parity byte
         val internal = Secp256k1.liftX(BigInteger(1, xOnly))
         val t = BigInteger(1, Hashes.taggedHash("TapTweak", xOnly)).mod(Secp256k1.N)
-        val output = Secp256k1.add(internal, Secp256k1.multiply(t, Secp256k1.G))
+        val output = Secp256k1.add(internal, Secp256k1.multiplyG(t))
         return Secp256k1.xOnly(output)
     }
 

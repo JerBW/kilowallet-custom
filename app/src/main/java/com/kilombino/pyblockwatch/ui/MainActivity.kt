@@ -1031,6 +1031,22 @@ internal fun SettingsPanel(
             }
         }
 
+        // Day to day the wallet leaves out addresses that are spent and long confirmed; this asks
+        // about every one of them again (it also happens on its own once a day).
+        Spacer(Modifier.height(10.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Full rescan", style = MaterialTheme.typography.bodyMedium, color = TextMain)
+                Explain("To go faster, refreshes skip addresses that are already spent and confirmed. " +
+                    "If someone pays to an old address again, this finds it (it also runs by itself once a day).")
+            }
+            var started by remember { mutableStateOf(false) }
+            TextButton(onClick = { vm.fullLook(); started = true }, enabled = !started) {
+                Text(if (started) "RUNNING…" else "RESCAN", color = accent, style = MaterialTheme.typography.bodySmall)
+            }
+            LaunchedEffect(started) { if (started) { delay(5_000); while (vm.isRefreshing(chain)) delay(1_000); started = false } }
+        }
+
         Spacer(Modifier.height(14.dp))
         // Node and explorer, folded: they matter once and take a lot of room.
         var nodeOpen by remember { mutableStateOf(false) }

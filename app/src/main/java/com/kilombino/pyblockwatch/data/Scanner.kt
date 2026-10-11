@@ -83,6 +83,7 @@ class Scanner(
         scriptType: ScriptType,
         gap: Int = gapLimit,
         extra: Extra? = null,
+        quick: Boolean = false,
     ): Flow<ScanEvent> = flow {
         val txHeights = HashMap<String, Int>()
         // The main account, then (for a hot wallet with Taproot on) its BIP-86 account.
@@ -94,6 +95,7 @@ class Scanner(
         }
 
         emit(ScanEvent.Connecting(endpoint))
+        val t0 = System.currentTimeMillis()
         val client = ElectrumClient(endpoint, pinnedFingerprint)
         try {
             client.connect()
@@ -106,6 +108,7 @@ class Scanner(
         val rows = mutableListOf<AddressRow>()
         try {
             val height = client.blockHeight()
+            android.util.Log.i("Kilowallet", "scan timing: connected in ${System.currentTimeMillis() - t0} ms")
             emit(ScanEvent.Connected(
                 client.serverVersion ?: "unknown", height,
                 client.serverFingerprint, client.fingerprintChanged,
@@ -116,47 +119,65 @@ class Scanner(
             for ((parsed, type, tag) in accounts) for (chainIndex in 0..1) {
                 val purpose = purposeFor(type)
                 val branch = Bip32.deriveChild(parsed, chainIndex)
+                val accountTag = accountTag(parsed, type)
                 var index = 0
                 var consecutiveEmpty = 0
                 while (consecutiveEmpty < gap) {
-                    val path = "m/$purpose'/0'/0'/$chainIndex/$index"
-                    emit(ScanEvent.Deriving(chainIndex, index, path))
-
-                    val child = Bip32.deriveChild(branch, index)
-                    val scriptHash = Address.scriptHashFor(child.pubkey(), type)
-                    val address = Address.encode(child.pubkey(), type)
-
-                    // Every address is asked about, every time: one status call (a hash of its
-                    // whole history, null when unused). History and balance are fetched only
-                    // when that hash differs from the one remembered with them, so an address
-                    // that did not move costs one call and nothing is ever taken on trust.
-                    val (hist, bal) = lookup(client, endpoint, scriptHash)
-                    val txs = hist.size
-
-                    val row = AddressRow(
-                        chainIndex = chainIndex, index = index, address = address,
-                        path = path, scriptHash = scriptHash,
-                        confirmed = bal.confirmed, unconfirmed = bal.unconfirmed, txCount = txs, type = tag,
-                    )
-                    if (row.isUsed) {
-                        rows += row
-                        hist.forEach { txHeights[it.txid] = it.height }
-                        consecutiveEmpty = 0
-                        emit(ScanEvent.Found(row))
-                    } else {
-                        consecutiveEmpty++
-                        emit(ScanEvent.GapProgress(chainIndex, consecutiveEmpty, gap))
+                    // The next addresses, never more than the walk could still need before it
+                    // stops (so the server hears of no address a one-by-one walk would not ask
+                    // about), with their statuses asked in one batch.
+                    val batch = (index until index + (gap - consecutiveEmpty)).map { i ->
+                        val (address, sh) = derived(accountTag, chainIndex, i) {
+                            val child = Bip32.deriveChild(branch, i)
+                            Address.encode(child.pubkey(), type) to Address.scriptHashFor(child.pubkey(), type)
+                        }
+                        Triple(i, address, sh)
                     }
-                    index++
+                    val known = batch.map { (_, _, sh) -> if (quick) settled(endpoint, sh, height) else null }
+                    val ask = batch.indices.filter { known[it] == null }
+                    val asked = client.statuses(ask.map { batch[it].third })
+                    val status = HashMap<Int, String?>().apply { ask.forEachIndexed { j, k -> put(k, asked[j]) } }
+
+                    var stop = false
+                    for ((k, entry) in batch.withIndex()) {
+                        val (i, address, scriptHash) = entry
+                        val path = "m/$purpose'/0'/0'/$chainIndex/$i"
+                        emit(ScanEvent.Deriving(chainIndex, i, path))
+                        // Every address is asked about (one status: a hash of its whole history,
+                        // null when unused), except, on a quick look, the spent and settled ones.
+                        // History and balance are fetched only when that hash differs from the
+                        // one remembered with them.
+                        val (hist, bal) = known[k] ?: resolve(client, endpoint, scriptHash, status[k])
+                        val row = AddressRow(
+                            chainIndex = chainIndex, index = i, address = address,
+                            path = path, scriptHash = scriptHash,
+                            confirmed = bal.confirmed, unconfirmed = bal.unconfirmed, txCount = hist.size, type = tag,
+                        )
+                        index = i + 1
+                        if (row.isUsed) {
+                            rows += row
+                            hist.forEach { txHeights[it.txid] = it.height }
+                            consecutiveEmpty = 0
+                            emit(ScanEvent.Found(row))
+                        } else {
+                            consecutiveEmpty++
+                            emit(ScanEvent.GapProgress(chainIndex, consecutiveEmpty, gap))
+                            if (consecutiveEmpty >= gap) { stop = true; break }
+                        }
+                    }
+                    if (stop) break
                 }
             }
+            val t1 = System.currentTimeMillis()
             // Confirmations from the tip: height <= 0 is still in the mempool (0 conf).
             val amounts = netAmounts(client, txHeights.keys, rows.map { it.scriptHash }.toSet())
+            val t2 = System.currentTimeMillis()
             val txs = txHeights.map { (id, h) ->
                 val a = amounts[id]
                 TxConf(id, if (h <= 0) 0 else height - h + 1, pending = h <= 0, amount = a,
                     spv = if (h > 0 && a != null && a > 0 && height - h < SPV_WINDOW) spvCheck(client, id, h) else null)
             }.sortedWith(compareBy({ !it.pending }, { it.confirmations }))
+            android.util.Log.i("Kilowallet", "scan timing: connect+walk ${t1 - t0} ms, amounts ${t2 - t1} ms, spv ${System.currentTimeMillis() - t2} ms")
             saveDisk()
             emit(ScanEvent.Done(rows, height, txs))
         } catch (e: Exception) {
@@ -194,7 +215,7 @@ class Scanner(
      * so it's cheap enough to run on a foreground timer without flickering the UI.
      */
     suspend fun refreshDetails(
-        rows: List<AddressRow>, endpoint: NodeEndpoint, pinnedFingerprint: String?,
+        rows: List<AddressRow>, endpoint: NodeEndpoint, pinnedFingerprint: String?, quick: Boolean = false,
     ): Triple<List<AddressRow>, List<TxConf>, Int> {
         val client = ElectrumClient(endpoint, pinnedFingerprint)
         return try {
@@ -204,8 +225,13 @@ class Scanner(
             // One status call per address; history and balance only for those that changed
             // since the last refresh (or were never seen). Most refreshes find nothing new,
             // so this halves the round trips, and an unused address costs a single call.
-            val updated = rows.map { r ->
-                val (hist, bal) = lookup(client, endpoint, r.scriptHash)
+            // Statuses in one batch, the settled addresses left out on a quick look.
+            val known = rows.map { r -> if (quick) settled(endpoint, r.scriptHash, tip) else null }
+            val ask = rows.indices.filter { known[it] == null }
+            val asked = client.statuses(ask.map { rows[it].scriptHash })
+            val status = HashMap<Int, String?>().apply { ask.forEachIndexed { j, k -> put(k, asked[j]) } }
+            val updated = rows.mapIndexed { k, r ->
+                val (hist, bal) = known[k] ?: resolve(client, endpoint, r.scriptHash, status[k])
                 hist.forEach { txHeights[it.txid] = it.height }
                 r.copy(confirmed = bal.confirmed, unconfirmed = bal.unconfirmed, txCount = hist.size)
             }
@@ -233,9 +259,22 @@ class Scanner(
      * History and balance of one address, from its status: what was remembered with the same
      * status, or fresh from the server when the status changed or was never seen.
      */
-    private fun lookup(client: ElectrumClient, endpoint: NodeEndpoint, scriptHash: String): Pair<List<ElectrumClient.HistoryItem>, ScriptHashBalance> {
+    /**
+     * A quick look leaves out an address that is done with: it was used, holds nothing, and
+     * everything that touched it is buried [SETTLED] blocks deep. Only a payment sent to an old
+     * address again would be missed, and the full look (daily, and on demand in settings) asks
+     * about every address.
+     */
+    private fun settled(endpoint: NodeEndpoint, scriptHash: String, tip: Int): Pair<List<ElectrumClient.HistoryItem>, ScriptHashBalance>? {
+        val e = statusCache[endpoint.toString() + "|" + scriptHash] ?: return null
+        val done = e.status != null && e.balance.confirmed == 0L && e.balance.unconfirmed == 0L && e.history.isNotEmpty() &&
+            e.history.all { it.height > 0 && tip - it.height + 1 >= SETTLED }
+        return if (done) e.history to e.balance else null
+    }
+
+    /** History and balance for a [status] just read: the remembered ones if it did not change. */
+    private fun resolve(client: ElectrumClient, endpoint: NodeEndpoint, scriptHash: String, status: String?): Pair<List<ElectrumClient.HistoryItem>, ScriptHashBalance> {
         val key = endpoint.toString() + "|" + scriptHash
-        val status = client.status(scriptHash)
         if (status == null) { statusCache.remove(key); return emptyList<ElectrumClient.HistoryItem>() to ScriptHashBalance(0, 0) }
         statusCache[key]?.takeIf { it.status == status }?.let { return it.history to it.balance }
         val entry = CachedAddress(status, client.history(scriptHash), client.balance(scriptHash))
@@ -364,6 +403,9 @@ class Scanner(
          * rewards mined in blocks 973 440–979 919 wait 6 480 confirmations; any other, 100.
          */
         const val LONG_MATURITY = 6480
+
+        /** Depth after which a spent address is left out of quick looks. */
+        const val SETTLED = 6
         fun maturityFor(height: Int): Int = if (height in 973_440..979_919) LONG_MATURITY else 100
 
         /** What an address looked like at its last status, so an unchanged one needs no more calls. */
@@ -387,6 +429,10 @@ class Scanner(
             dir.mkdirs(); java.io.File(dir, "tx").mkdirs()
             disk = dir
             runCatching {
+                val o = org.json.JSONObject(java.io.File(dir, "derived.json").readText())
+                for (k in o.keys()) { val a = o.getJSONArray(k); derivedCache[k] = a.getString(0) to a.getString(1) }
+            }
+            runCatching {
                 val o = org.json.JSONObject(java.io.File(dir, "status.json").readText())
                 for (k in o.keys()) {
                     val e = o.getJSONObject(k)
@@ -400,6 +446,12 @@ class Scanner(
 
         private fun saveDisk(): Unit = synchronized(this) {
             val dir = disk ?: return
+            if (derivedDirty) runCatching {
+                val o = org.json.JSONObject()
+                for ((k, v) in derivedCache) o.put(k, org.json.JSONArray().put(v.first).put(v.second))
+                val tmp = java.io.File(dir, "derived.json.tmp"); tmp.writeText(o.toString())
+                tmp.renameTo(java.io.File(dir, "derived.json")); derivedDirty = false
+            }
             if (!cacheDirty) return
             runCatching {
                 val o = org.json.JSONObject()
@@ -414,6 +466,23 @@ class Scanner(
             }
         }
 
+        /**
+         * Addresses already worked out, by account, branch and index: deriving them is the slow
+         * part of a look on a phone, and the result never changes. Kept with the statuses.
+         */
+        private val derivedCache = java.util.concurrent.ConcurrentHashMap<String, Pair<String, String>>()
+        @Volatile private var derivedDirty = false
+
+        private fun accountTag(parsed: Bip32.ExtendedPubKey, type: ScriptType): String =
+            com.kilombino.pyblockwatch.crypto.Hashes.sha256(parsed.pubkey() + parsed.chainCode + type.name.toByteArray()).joinToString("") { "%02x".format(it) }.take(16)
+
+        private inline fun derived(tag: String, chainIndex: Int, index: Int, make: () -> Pair<String, String>): Pair<String, String> {
+            val key = "$tag/$chainIndex/$index"
+            derivedCache[key]?.let { return it }
+            val v = make(); derivedCache[key] = v; derivedDirty = true
+            return v
+        }
+
         /** Read the remembered statuses again (a backup file just put them back). */
         fun reloadDisk(dir: java.io.File): Unit = synchronized(this) {
             statusCache.clear(); disk = null
@@ -422,8 +491,8 @@ class Scanner(
 
         /** Forget everything remembered (a wallet was forgotten or switched). */
         fun clearDisk(): Unit = synchronized(this) {
-            statusCache.clear(); txCache.clear()
-            disk?.let { d -> java.io.File(d, "status.json").delete(); java.io.File(d, "tx").listFiles()?.forEach { it.delete() } }
+            statusCache.clear(); txCache.clear(); derivedCache.clear()
+            disk?.let { d -> java.io.File(d, "status.json").delete(); java.io.File(d, "derived.json").delete(); java.io.File(d, "tx").listFiles()?.forEach { it.delete() } }
             Unit
         }
 

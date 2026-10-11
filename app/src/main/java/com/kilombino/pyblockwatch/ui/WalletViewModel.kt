@@ -304,7 +304,7 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
      * On success it feeds the fresh figures to [BalanceWatch], which decides whether the
      * change deserves a notification (mempool arrival, first confirmation, …).
      */
-    fun refresh(chain: Chain) {
+    fun refresh(chain: Chain, full: Boolean = false) {
         // This wallet's store and notifier, fixed now: a switch to the other wallet while this
         // runs must not file its figures (or its notifications) under the other one.
         val ws = store; val nf = notifier
@@ -331,15 +331,22 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
                 var doneRows: List<AddressRow>? = null
                 var doneTxs: List<TxConf> = emptyList()
                 var tip = cs.height
-                scanner.scan(xpub, chain, endpoint, pin, ws.scriptType, ws.gapLimit, extraAccount()).collect { ev ->
+                // Quick unless asked for, or a day has gone by since every address was looked at.
+                val quick = !full && !ws.fullLookDue(chain)
+                val started = System.currentTimeMillis()
+                var lastShown = 0L
+                scanner.scan(xpub, chain, endpoint, pin, ws.scriptType, ws.gapLimit, extraAccount(), quick).collect { ev ->
                     when (ev) {
                         is ScanEvent.Connected ->
                             if (pin == null && ev.fingerprint != null) ws.pinFingerprint(endpoint, ev.fingerprint)
                         is ScanEvent.Done -> { doneRows = ev.rows; doneTxs = ev.txs; tip = ev.height }
                         // Progress, on one line under "scan complete": the balance stays as it is meanwhile.
-                        is ScanEvent.Deriving -> { checked++; updateIf(xpub, chain) {
-                            it.copy(refreshing = "${if (ev.chainIndex == 0) "receive" else "change"} ${ev.path} · $checked checked")
-                        } }
+                        // The progress line at most a few times a second: redrawing the screen for
+                        // every address made the look wait on the screen.
+                        is ScanEvent.Deriving -> { checked++; val now = System.currentTimeMillis()
+                            if (now - lastShown > 300) { lastShown = now; updateIf(xpub, chain) {
+                                it.copy(refreshing = "${if (ev.chainIndex == 0) "receive" else "change"} ${ev.path} · $checked checked")
+                            } } }
                         is ScanEvent.Failed -> updateIf(xpub, chain) { it.copy(refreshing = null) }
                         // Shown even on a silent refresh: the user has to decide about it.
                         is ScanEvent.CertificateChanged -> updateIf(xpub, chain) {
@@ -349,6 +356,8 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
                     }
                 }
                 val rows = doneRows ?: return@runCatching
+                android.util.Log.i("Kilowallet", "look ${chain.name} ${if (quick) "quick" else "full"}: ${rows.size} used, ${System.currentTimeMillis() - started} ms")
+                if (!quick) ws.setLastFullLook(chain)
                 if (_state.value.xpub == xpub) noteUsed(rows)
                 val conf = rows.sumOf { it.confirmed }
                 val unconf = rows.sumOf { it.unconfirmed }
@@ -361,6 +370,14 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 saveSnapshot(chain)
             } } finally { updateIf(xpub, chain) { it.copy(refreshing = null) } }
+        }
+    }
+
+    /** Settings → "check every address again": a full look now, spent addresses included. */
+    fun fullLook() {
+        scannableChains().forEach { chain ->
+            refreshJobs[chain]?.cancel()
+            refresh(chain, full = true)
         }
     }
 
@@ -675,7 +692,7 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
                             fingerprint = ev.fingerprint, fingerprintChanged = true)
                     }
                 }
-                if (ev is ScanEvent.Done) saveSnapshot(chain)
+                if (ev is ScanEvent.Done) { ws.setLastFullLook(chain); saveSnapshot(chain) }
             }
         }
     }

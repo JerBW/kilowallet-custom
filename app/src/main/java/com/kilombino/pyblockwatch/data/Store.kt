@@ -205,6 +205,15 @@ class Store(context: Context, private val profile: String = HOT) {
         get() = prefs.getBoolean(KEY_NOTIFY, true)
         set(v) = prefs.edit().putBoolean(KEY_NOTIFY, v).apply()
 
+    /**
+     * When every address of [chain] was last asked about (ms). Looks in between leave out the
+     * addresses that are done with (see Scanner.lookup); a day later the next look is full.
+     */
+    fun lastFullLook(chain: Chain): Long = prefs.getLong(k("full_look_" + chain.name), 0)
+    fun setLastFullLook(chain: Chain, at: Long = System.currentTimeMillis()) =
+        prefs.edit().putLong(k("full_look_" + chain.name), at).apply()
+    fun fullLookDue(chain: Chain): Boolean = System.currentTimeMillis() - lastFullLook(chain) > FULL_LOOK_EVERY_MS
+
     /** Seconds between refreshes while the app is on screen; 0 = only by hand. */
     var refreshOpenSeconds: Int
         get() = prefs.getInt("refresh_open_s", 300)
@@ -296,6 +305,9 @@ class Store(context: Context, private val profile: String = HOT) {
     }
 
     companion object {
+        /** A full look of every address at least this often. */
+        const val FULL_LOOK_EVERY_MS = 24 * 3600 * 1000L
+
         /**
          * Certificates shipped with the app, so even the first connection to the default server
          * is checked (not trust-on-first-use). fulcrum.kilombino.com's own certificate,

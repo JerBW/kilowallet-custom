@@ -282,6 +282,42 @@ class ElectrumClient(
     fun status(scriptHash: String): String? = if (node != null) node.status(scriptHash) else
         call("blockchain.scripthash.subscribe", JSONArray().put(scriptHash))?.takeIf { it != JSONObject.NULL }?.toString()
 
+    /**
+     * [status] of many scripthashes in one go: every request is written first and the answers
+     * read as they come (by id), so a scan waits for one round trip per batch instead of one
+     * per address.
+     */
+    fun statuses(scriptHashes: List<String>): List<String?> {
+        if (node != null || scriptHashes.size <= 1) return scriptHashes.map { status(it) }
+        // Servers cap how many requests may wait at once: a long list goes in rounds.
+        if (scriptHashes.size > 50) return scriptHashes.chunked(50).flatMap { statuses(it) }
+        val w = writer ?: throw ElectrumException("client not connected")
+        val r = reader ?: throw ElectrumException("client not connected")
+        val ids = scriptHashes.map { sh ->
+            val id = nextId++
+            val req = JSONObject().put("jsonrpc", "2.0").put("id", id)
+                .put("method", "blockchain.scripthash.subscribe").put("params", JSONArray().put(sh))
+            try { w.write(req.toString()); w.write("\n") } catch (e: Exception) {
+                throw ElectrumException("Lost the connection while sending subscribe: ${e.message}", e)
+            }
+            id
+        }
+        try { w.flush() } catch (e: Exception) { throw ElectrumException("Lost the connection: ${e.message}", e) }
+        val want = ids.toHashSet()
+        val got = HashMap<Int, String?>()
+        while (got.size < ids.size) {
+            val line = try { r.readLine() } catch (e: Exception) {
+                throw ElectrumException("Lost the connection while waiting for subscribe: ${e.message}", e)
+            } ?: throw ElectrumException("The server closed the connection during subscribe")
+            val obj = try { JSONObject(line) } catch (e: Exception) { continue }
+            val id = obj.optInt("id", -1)
+            if (id !in want) continue   // a notification, not one of our answers
+            if (obj.has("error") && !obj.isNull("error")) throw ElectrumException("subscribe: ${obj.get("error")}")
+            got[id] = obj.opt("result")?.takeIf { it != JSONObject.NULL }?.toString()
+        }
+        return ids.map { got[it] }
+    }
+
     /** One entry of an address's on-chain history. height <= 0 means still in the mempool. */
     data class HistoryItem(val txid: String, val height: Int)
 

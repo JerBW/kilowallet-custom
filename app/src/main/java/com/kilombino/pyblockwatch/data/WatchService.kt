@@ -72,7 +72,9 @@ class WatchService : Service() {
                             (taproot?.let { deriveKnownAddresses(it, chain, ws, com.kilombino.pyblockwatch.crypto.ScriptType.P2TR) } ?: emptyList())
                         if (rows.isEmpty()) return@runCatching
                         val endpoint = store.endpoint(chain)
-                        val (updated, txs, _) = scanner.refreshDetails(rows, endpoint, store.pinnedFingerprint(endpoint))
+                        val quick = !ws.fullLookDue(chain)
+                        val (updated, txs, _) = scanner.refreshDetails(rows, endpoint, store.pinnedFingerprint(endpoint), quick)
+                        if (!quick) ws.setLastFullLook(chain)
                         BalanceWatch.evaluate(
                             ws, notifier, chain,
                             updated.sumOf { it.confirmed }, updated.sumOf { it.unconfirmed }, txs,

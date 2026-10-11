@@ -84,6 +84,12 @@ object Secp256k1 {
     /** k·G for a SECRET k: through libsecp256k1 when present (constant time), else [multiply]. */
     fun publicPoint(k: BigInteger): Point = NativeSecp.pubkey(k) ?: multiply(k, G)
 
+    /**
+     * k·G for a PUBLIC scalar (BIP-32 public derivation, the Taproot tweak): through
+     * libsecp256k1 when the app has it, which is far faster than the BigInteger ladder.
+     */
+    fun multiplyG(k: BigInteger): Point = NativeSecp.pubkey(k) ?: multiply(k, G)
+
     fun multiply(k: BigInteger, point: Point): Point {
         var scalar = k.mod(N)
         if (scalar.signum() == 0 || point.isInfinity) return INFINITY
