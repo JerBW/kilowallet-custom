@@ -1403,18 +1403,30 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
                 !(ended && !st.postedOutput)
             }
             .mapNotNull { if (chainIndex == 0) it.mixScript else it.seat.changeScript }
-            .map { it.toList() }.toSet()
+            .map { it.toList() }.toMutableSet()
         if (scripts.isEmpty()) return 0
-        val parsed = runCatching { com.kilombino.pyblockwatch.crypto.Bip32.parseExtendedPubKey(xpub) }.getOrNull() ?: return 0
-        // Reservations sit right after what is used; look a little past it.
+        // A seat's addresses were handed out at or past what was used then, so only what lies
+        // at or past `from` can still push the next index. Derived scripts are cached: this
+        // runs on the main thread, from the screens that show an address.
         var top = 0
-        for (i in maxOf(0, from - 30) until from + 60) {
-            val sp = com.kilombino.pyblockwatch.crypto.Address.scriptPubKey(
-                com.kilombino.pyblockwatch.crypto.Bip32.derivePath(parsed, chainIndex, i).pubkey(), store.scriptType).toList()
-            if (sp in scripts) top = i + 1
+        for (i in from until from + 40) {
+            if (scripts.isEmpty()) break
+            val sp = derivedScript(xpub, chainIndex, i) ?: break
+            if (scripts.remove(sp)) top = i + 1
         }
         return top
     }
+
+    private val scriptCache = java.util.concurrent.ConcurrentHashMap<String, List<Byte>>()
+
+    /** scriptPubKey of [xpub]/[chainIndex]/[index], derived once. */
+    private fun derivedScript(xpub: String, chainIndex: Int, index: Int): List<Byte>? =
+        scriptCache.getOrPut("$xpub/$chainIndex/$index/${store.scriptType}") {
+            val parsed = runCatching { com.kilombino.pyblockwatch.crypto.Bip32.parseExtendedPubKey(xpub) }.getOrNull()
+                ?: return null
+            com.kilombino.pyblockwatch.crypto.Address.scriptPubKey(
+                com.kilombino.pyblockwatch.crypto.Bip32.derivePath(parsed, chainIndex, index).pubkey(), store.scriptType).toList()
+        }
 
     /** Remember how far each branch has been used, so the other chain knows before its own scan. */
     private fun noteUsed(rows: List<AddressRow>) {

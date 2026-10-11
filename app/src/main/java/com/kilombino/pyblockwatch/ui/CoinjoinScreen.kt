@@ -46,6 +46,7 @@ import com.kilombino.pyblockwatch.coinjoin.Protocol
 import com.kilombino.pyblockwatch.data.Scanner
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.withContext
 
 /**
@@ -248,7 +249,14 @@ private fun unlockAndPick(
 ) {
     runCatching { vm.seedDecryptCipher() }.onSuccess { cipher ->
         Biometric.authenticate(activity, title, subtitle, cipher,
-            onSuccess = { authed -> runCatching { vm.coinjoinPick(authed, u) }.onSuccess(onPick).onFailure { onError(it.message ?: "could not unlock") } },
+            // The seed (PBKDF2) and the keys are worked out off the main thread: done on it, a
+            // slow phone showed "app isn't responding" here.
+            onSuccess = { authed ->
+                activity.lifecycleScope.launch {
+                    runCatching { withContext(Dispatchers.Default) { vm.coinjoinPick(authed, u) } }
+                        .onSuccess(onPick).onFailure { onError(it.message ?: "could not unlock") }
+                }
+            },
             onError = onError)
     }.onFailure { onError(it.message ?: "could not unlock") }
 }
