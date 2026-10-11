@@ -1139,12 +1139,42 @@ internal fun SettingsPanel(
             }) { Text("CHECK NOW", color = accent, style = MaterialTheme.typography.bodySmall) }
         }
         Spacer(Modifier.height(6.dp))
+        // Another hot wallet takes this one's place on the phone: asked first, like forgetting it.
+        var askSwitch by remember { mutableStateOf(false) }
+        var switchWords by remember { mutableStateOf(false) }
         Button(
-            onClick = { vm.startSetup() },
+            onClick = { if (state.hasSeed) { switchWords = false; askSwitch = true } else vm.startSetup() },
             colors = ButtonDefaults.buttonColors(containerColor = PanelSoft, contentColor = accent),
             shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth(),
         ) { Text(if (state.isHot) "SWITCH / NEW WALLET" else "CREATE A DIFFERENT HOT WALLET",
                  style = MaterialTheme.typography.titleMedium) }
+        if (askSwitch) AlertDialog(
+            onDismissRequest = { askSwitch = false },
+            title = { Text("Switch to another wallet?") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Creating or restoring another spending wallet REPLACES this one's seed on this phone. The coins stay " +
+                        "on-chain, but the only way back to them is your recovery words (and passphrase, if it has one). " +
+                        "Without them, the money is lost. A watch-only wallet next to it changes nothing.",
+                        style = MaterialTheme.typography.bodySmall)
+                    Text("Before that: have your recovery words written on paper, the safest backup there is. If you use Ark, also " +
+                            "save a backup file (settings → Backup file): it keeps your Ark wallet, its on-chain coins and emergency " +
+                            "exits, nodes, contacts and coinjoin rounds. The file is a help, not a replacement for the words on paper.", style = MaterialTheme.typography.bodySmall, color = Warn)
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { switchWords = !switchWords }) {
+                        Text(if (switchWords) "☑" else "☐", color = Bad, style = MaterialTheme.typography.titleMedium)
+                        Spacer(Modifier.width(8.dp))
+                        Text("I have my recovery words written down", style = MaterialTheme.typography.bodySmall, color = TextMain)
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(enabled = switchWords, onClick = { askSwitch = false; vm.startSetup() }) {
+                    Text("GO ON", color = if (switchWords) Bad else TextFaint)
+                }
+            },
+            dismissButton = { TextButton(onClick = { askSwitch = false }) { Text("STAY", color = TextSoft) } },
+            containerColor = PanelBg, titleContentColor = TextMain, textContentColor = TextSoft,
+        )
         // Forgetting a hot wallet deletes its seed from this phone: never in one tap.
         val forgetActivity = LocalContext.current as androidx.fragment.app.FragmentActivity
         var askForget by remember { mutableStateOf(false) }
@@ -1162,6 +1192,9 @@ internal fun SettingsPanel(
                             "them is your recovery words (and passphrase, if it has one). Without them, the money is lost."
                     else "This removes the watch-only wallet from this phone. Nothing on-chain changes; you can add the xpub again.",
                         style = MaterialTheme.typography.bodySmall)
+                    if (state.isHot) Text("Before that: have your recovery words written on paper, the safest backup there is. If you use Ark, also " +
+                            "save a backup file (settings → Backup file): it keeps your Ark wallet, its on-chain coins and emergency " +
+                            "exits, nodes, contacts and coinjoin rounds. The file is a help, not a replacement for the words on paper.", style = MaterialTheme.typography.bodySmall, color = Warn)
                     if (state.isHot) Row(verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.clickable { haveWords = !haveWords }) {
                         Text(if (haveWords) "☑" else "☐", color = Bad, style = MaterialTheme.typography.titleMedium)

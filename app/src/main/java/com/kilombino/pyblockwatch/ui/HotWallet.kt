@@ -177,15 +177,6 @@ fun DiceScreen(vm: WalletViewModel, onBack: () -> Unit) {
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("GENERATE SEED", style = MaterialTheme.typography.titleMedium) }
 
-            TextButton(onClick = {
-                error = null
-                val bytes = ByteArray(strength / 8).also { SecureRandom().nextBytes(it) }
-                runCatching { Bip39.fromEntropy(bytes) }
-                    .onSuccess { mnemonic = it }.onFailure { error = it.message }
-            }, modifier = Modifier.fillMaxWidth()) {
-                Text("or use the phone's secure randomness", color = TextFaint,
-                     style = MaterialTheme.typography.bodySmall)
-            }
         } else {
             SeedBackup(
                 words = words,
