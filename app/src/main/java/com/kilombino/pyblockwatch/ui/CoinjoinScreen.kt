@@ -44,6 +44,8 @@ import com.kilombino.pyblockwatch.coinjoin.CoinjoinTx
 import com.kilombino.pyblockwatch.coinjoin.PoolSession
 import com.kilombino.pyblockwatch.coinjoin.Protocol
 import com.kilombino.pyblockwatch.data.Scanner
+import com.kilombino.pyblockwatch.crypto.ScriptType
+import androidx.compose.runtime.mutableStateListOf
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import androidx.lifecycle.lifecycleScope
@@ -152,11 +154,11 @@ fun CoinjoinScreen(vm: WalletViewModel, accent: Color) {
                 label = { Text("pool password", style = MaterialTheme.typography.bodySmall) },
                 singleLine = true, textStyle = MaterialTheme.typography.bodyMedium, modifier = Modifier.fillMaxWidth())
         }
-        CoinPicker(vm, accent, "Join · ${groupSats(t.amount)} sats", t.amount, t.feeRate,
+        CoinPicker(vm, accent, "Join · ${groupSats(t.amount)} sats${poolKind(t)}", t.amount, t.feeRate, t.script, t.maxInputs,
             onCancel = { joining = null; joinPassword = "" },
             onPicked = { u ->
                 if (t.private && joinPassword.isEmpty()) { message = "Type the pool's password first."; return@CoinPicker }
-                unlockAndPick(activity, vm, u, "Join coinjoin", "Unlock to prove you own the coin",
+                unlockAndPick(activity, vm, u, "Join coinjoin", "Unlock to prove you own the coins",
                     onPick = { pick ->
                         scope.launch {
                             runCatching { withContext(Dispatchers.Default) { CoinjoinHub.join(ctx, t, pick, joinPassword) } }
@@ -168,11 +170,11 @@ fun CoinjoinScreen(vm: WalletViewModel, accent: Color) {
         return
     }
     if (creating) {
-        CreatePool(vm, accent, testPools, onCancel = { creating = false }) { amount, rate, minPeers, peers, hours, password, u ->
-            unlockAndPick(activity, vm, u, "Open a coinjoin pool", "Unlock to put your coin in",
+        CreatePool(vm, accent, testPools, onCancel = { creating = false }) { amount, rate, minPeers, peers, hours, password, maxInputs, u ->
+            unlockAndPick(activity, vm, u, "Open a coinjoin pool", "Unlock to put your coins in",
                 onPick = { pick ->
                     scope.launch {
-                        runCatching { withContext(Dispatchers.Default) { CoinjoinHub.create(ctx, pick, amount, rate, peers, hours, minPeers, password) } }
+                        runCatching { withContext(Dispatchers.Default) { CoinjoinHub.create(ctx, pick, amount, rate, peers, hours, minPeers, password, maxInputs) } }
                             .onSuccess { creating = false; reloadPools() }
                             .onFailure { message = it.message }
                     }
@@ -206,13 +208,19 @@ fun CoinjoinScreen(vm: WalletViewModel, accent: Color) {
                 Column(Modifier.weight(1f)) {
                     Text((if (t.private) "🔒 " else "") + "${groupSats(t.amount)} sats" + if (t.amount < Protocol.MIN_AMOUNT) "  · TEST" else "",
                         style = MaterialTheme.typography.titleMedium, color = TextMain)
+                    Text(poolTypeLine(t), style = MaterialTheme.typography.bodySmall, color = accent)
                     Text("${t.peers}/${t.maxPeers} people (min ${t.minPeers}) · ${t.feeRate} sat/vB · closes in ${remaining(t.expiresAt)}",
                         style = MaterialTheme.typography.bodySmall, color = TextSoft)
-                    Text("joining costs you ${CoinjoinTx.feeShare(t.feeRate, true)} sats in fees " +
-                        "(${CoinjoinTx.feeShare(t.feeRate, false)} with a coin of exactly ${groupSats(t.amount + CoinjoinTx.feeShare(t.feeRate, false))})",
+                    val fs = CoinjoinTx.feeShare(t.feeRate, false, 1, t.script)
+                    Text("joining costs you ${CoinjoinTx.feeShare(t.feeRate, true, 1, t.script)} sats in fees with one coin " +
+                        "($fs with a coin of exactly ${groupSats(t.amount + fs)})",
                         style = MaterialTheme.typography.bodySmall, color = TextFaint)
+                    if (t.script == ScriptType.P2TR && !vm.taprootPools())
+                        Text("Taproot pool: turn on Taproot addresses in settings to join it.",
+                            style = MaterialTheme.typography.bodySmall, color = Warn)
                 }
                 Button(
+                    enabled = t.script != ScriptType.P2TR || vm.taprootPools(),
                     onClick = { joining = t },
                     colors = ButtonDefaults.buttonColors(containerColor = PanelSoft, contentColor = accent),
                     shape = RoundedCornerShape(12.dp),
@@ -243,8 +251,16 @@ private fun remaining(at: Long): String {
     }
 }
 
+/** " · Taproot" for a Taproot pool. */
+private fun poolKind(t: Protocol.Terms): String = if (t.script == ScriptType.P2TR) " · Taproot" else ""
+
+/** What kind of pool it is, in one line. */
+private fun poolTypeLine(t: Protocol.Terms): String =
+    (if (t.script == ScriptType.P2TR) "Taproot (bc1p) coins only" else "Native SegWit (bc1q) coins only") +
+        (if (t.maxInputs > 1) " · up to ${t.maxInputs} coins each" else " · one coin each")
+
 private fun unlockAndPick(
-    activity: FragmentActivity, vm: WalletViewModel, u: Scanner.SpendableUtxo, title: String, subtitle: String,
+    activity: FragmentActivity, vm: WalletViewModel, u: List<Scanner.SpendableUtxo>, title: String, subtitle: String,
     onPick: (CoinjoinHub.Pick) -> Unit, onError: (String) -> Unit,
 ) {
     runCatching { vm.seedDecryptCipher() }.onSuccess { cipher ->
@@ -264,73 +280,112 @@ private fun unlockAndPick(
 @Composable
 private fun CoinPicker(
     vm: WalletViewModel, accent: Color, title: String, amount: Long, feeRate: Double,
-    onCancel: () -> Unit, onPicked: (Scanner.SpendableUtxo) -> Unit,
+    type: ScriptType, maxInputs: Int,
+    onCancel: () -> Unit, onPicked: (List<Scanner.SpendableUtxo>) -> Unit,
 ) {
+    val tag = if (type == ScriptType.P2TR) ScriptType.P2TR else null
+    val kind = if (type == ScriptType.P2TR) "Taproot (bc1p)" else "native SegWit (bc1q)"
     var coins by remember { mutableStateOf<List<Scanner.SpendableUtxo>?>(null) }
-    var chosen by remember { mutableStateOf<Scanner.SpendableUtxo?>(null) }
-    LaunchedEffect(Unit) { coins = runCatching { vm.coinjoinCoins() }.getOrDefault(emptyList()) }
-    val min = CoinjoinTx.minimumCoin(amount, feeRate)
+    val chosen = remember { mutableStateListOf<Scanner.SpendableUtxo>() }
+    var reload by remember { mutableStateOf(0) }
+    LaunchedEffect(reload) { coins = runCatching { vm.coinjoinCoins(tag) }.getOrDefault(emptyList()) }
+    val min = CoinjoinTx.minimumCoin(amount, feeRate, type)
+    // The perfect coin: exactly the amount plus this pool's fee, so nobody gets change.
+    val exact = amount + CoinjoinTx.feeShare(feeRate, false, 1, type)
+    var making by remember { mutableStateOf(false) }
+    var offerPerfect by remember { mutableStateOf(false) }
+    val total = chosen.sumOf { it.value }
+    val change = if (chosen.isEmpty()) null else CoinjoinTx.change(total, amount, feeRate, chosen.size, type)
+    val fee = if (change == null) 0L else total - amount - change
+
+    if (offerPerfect) AlertDialog(
+        onDismissRequest = { offerPerfect = false },
+        title = { Text("Make the perfect coin?") },
+        text = { Text("With ${if (chosen.size == 1) "this coin" else "these ${chosen.size} coins"} you get ${groupSats(change ?: 0)} sats " +
+            "of change back, and that change shows on the chain next to your coins. A single coin of exactly " +
+            "${groupSats(exact)} sats goes in with no change at all, so nothing ties your mixed output to anything. " +
+            "You can make it now: a payment to yourself (from any of your coins, bc1q and bc1p together), " +
+            "which needs one confirmation before it can join.") },
+        confirmButton = { TextButton(onClick = { offerPerfect = false; vm.resetSend(); making = true }) {
+            Text("MAKE THE PERFECT COIN", color = accent) } },
+        dismissButton = { TextButton(onClick = { offerPerfect = false; onPicked(chosen.toList()) }) {
+            Text("NOT NEEDED, CONTINUE", color = TextSoft) } },
+        containerColor = PanelBg, titleContentColor = TextMain, textContentColor = TextSoft,
+    )
+
     Panel(accent = accent) {
         SectionLabel(title, accent)
         Spacer(Modifier.height(8.dp))
-        Explain("Pick ONE confirmed coin of at least ${groupSats(min)} sats. Its leftover comes back to a fresh " +
+        if (making) {
+            ExactCoinPanel(vm, accent, exact, tag) { making = false; reload++ }
+            return@Panel
+        }
+        Explain(if (maxInputs > 1)
+            "Pick up to $maxInputs confirmed $kind coins that together make at least ${groupSats(amount)} sats plus your fee. " +
+                "The leftover comes back to a fresh change address; the mixed output goes to another fresh address of this wallet."
+        else "Pick ONE confirmed $kind coin of at least ${groupSats(min)} sats. Its leftover comes back to a fresh " +
             "change address; the mixed output goes to another fresh address of this wallet.")
         Spacer(Modifier.height(8.dp))
         val list = coins
+        val selectable = list?.filter { maxInputs > 1 || it.value >= min }
         when {
             list == null -> Text("reading your coins…", color = TextSoft, style = MaterialTheme.typography.bodySmall)
-            list.none { it.value >= min } -> Text("No confirmed coin is big enough.", color = Warn, style = MaterialTheme.typography.bodySmall)
+            list.isEmpty() -> Text("No confirmed $kind coin.", color = Warn, style = MaterialTheme.typography.bodySmall)
+            selectable.isNullOrEmpty() -> Text("No confirmed coin is big enough.", color = Warn, style = MaterialTheme.typography.bodySmall)
             // The exact coin first: it joins with no change, so the mixed output is tied to nothing.
-            else -> list.filter { it.value >= min }.sortedBy { if (it.value == min) 0 else 1 }.forEach { u ->
-                val sel = chosen == u
+            else -> selectable.sortedWith(compareBy({ if (it.value == exact) 0 else 1 }, { -it.value })).forEach { u ->
+                val sel = chosen.any { it.txid == u.txid && it.vout == u.vout }
                 Row(
                     Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
                         .background(if (sel) accent.copy(alpha = 0.15f) else Color.Transparent)
-                        .clickable { chosen = u }.padding(10.dp),
+                        .clickable {
+                            if (sel) chosen.removeAll { it.txid == u.txid && it.vout == u.vout }
+                            else if (maxInputs == 1) { chosen.clear(); chosen.add(u) }
+                            else if (chosen.size < maxInputs) chosen.add(u)
+                        }.padding(10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Column(Modifier.weight(1f)) {
-                        Text("${groupSats(u.value)} sats", color = TextMain, style = MaterialTheme.typography.bodyMedium)
-                        val ch = CoinjoinTx.change(u.value, amount, feeRate) ?: 0
-                        val fee = u.value - amount - ch
-                        when {
-                            u.value == min -> Text("★ EXACT · no change · fee ${groupSats(fee)}",
-                                color = Good, style = MaterialTheme.typography.bodySmall)
-                            ch == 0L -> Text("no change, but ${groupSats(fee - (min - amount))} extra goes to the miners · fee ${groupSats(fee)}",
-                                color = Warn, style = MaterialTheme.typography.bodySmall)
-                            else -> Text("change ${groupSats(ch)} · fee ${groupSats(fee)}",
-                                color = TextFaint, style = MaterialTheme.typography.bodySmall)
-                        }
-                        Text("${u.txid.take(10)}…:${u.vout}", color = TextFaint, style = MaterialTheme.typography.bodySmall)
+                        Text("${groupSats(u.value)} sats" + if (u.value == exact) "  ★ EXACT" else "",
+                            color = if (u.value == exact) Good else TextMain, style = MaterialTheme.typography.bodyMedium)
+                        Text(vm.coinAddress(u)?.let { shortAddress(it) } ?: "${u.txid.take(10)}…:${u.vout}",
+                            color = TextFaint, style = MaterialTheme.typography.bodySmall)
                     }
                     if (sel) Text("✓", color = accent)
                 }
             }
         }
-        // Coins that cover the amount but not this pool's fee (an exact coin made for a pool at a
-        // lower rate, say): shown, not hidden, so it is clear why they can't be picked.
-        list?.filter { it.value in amount until min }?.sortedByDescending { it.value }?.forEach { u ->
+        // One coin each: coins that cover the amount but not this pool's fee are shown, not hidden.
+        if (maxInputs == 1) list?.filter { it.value in amount until min }?.sortedByDescending { it.value }?.forEach { u ->
             Column(Modifier.fillMaxWidth().padding(10.dp)) {
                 Text("${groupSats(u.value)} sats", color = TextFaint, style = MaterialTheme.typography.bodyMedium)
                 Text("${groupSats(min - u.value)} sats short of this pool's fee (${fmtRate(feeRate)} sat/vB): " +
                     "it fits a pool at a lower rate", color = Warn, style = MaterialTheme.typography.bodySmall)
-                Text("${u.txid.take(10)}…:${u.vout}", color = TextFaint, style = MaterialTheme.typography.bodySmall)
             }
         }
-        // The perfect coin: exactly the amount plus this pool's fee, so nobody gets change.
-        val exact = amount + CoinjoinTx.feeShare(feeRate, false)
-        var making by remember { mutableStateOf(false) }
-        if (making) ExactCoinPanel(vm, accent, exact) { making = false }
-        else if (list != null && list.none { it.value == exact }) TextButton(onClick = { vm.resetSend(); making = true }) {
+        if (chosen.isNotEmpty()) {
+            Spacer(Modifier.height(4.dp))
+            Text(when {
+                change == null -> "${chosen.size} coin(s), ${groupSats(total)} sats: " +
+                    "${groupSats(amount + CoinjoinTx.feeShare(feeRate, false, chosen.size, type) - total)} sats short"
+                change == 0L && total == exact -> "★ exact: no change · fee ${groupSats(fee)} sats"
+                change == 0L -> "${chosen.size} coin(s) · no change, ${groupSats(fee)} sats to the miners"
+                else -> "${chosen.size} coin(s) · ${groupSats(total)} sats → ${groupSats(amount)} mixed + ${groupSats(change)} change · fee ${groupSats(fee)}"
+            }, color = if (change == null) Warn else accent, style = MaterialTheme.typography.bodySmall)
+        }
+        if (list != null && list.none { it.value == exact }) TextButton(onClick = { vm.resetSend(); making = true }) {
             Text("＋ PREPARE AN EXACT COIN OF ${groupSats(exact)} SATS", color = accent, style = MaterialTheme.typography.bodySmall)
         }
         Spacer(Modifier.height(10.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(onClick = onCancel, colors = ButtonDefaults.buttonColors(containerColor = PanelSoft, contentColor = TextSoft),
                 shape = RoundedCornerShape(12.dp), modifier = Modifier.weight(1f)) { Text("CANCEL") }
-            Button(onClick = { chosen?.let(onPicked) }, enabled = chosen != null,
+            Button(onClick = { if ((change ?: 0) > 0) offerPerfect = true else onPicked(chosen.toList()) },
+                enabled = change != null,
                 colors = ButtonDefaults.buttonColors(containerColor = accent, contentColor = Ink),
-                shape = RoundedCornerShape(12.dp), modifier = Modifier.weight(1f)) { Text("USE THIS COIN") }
+                shape = RoundedCornerShape(12.dp), modifier = Modifier.weight(1f)) {
+                Text(if (chosen.size > 1) "USE THESE ${chosen.size} COINS" else "USE THIS COIN")
+            }
         }
     }
 }
@@ -338,8 +393,13 @@ private fun CoinPicker(
 @Composable
 private fun CreatePool(
     vm: WalletViewModel, accent: Color, allowTest: Boolean, onCancel: () -> Unit,
-    onCreate: (amount: Long, rate: Double, minPeers: Int, maxPeers: Int, hours: Int, password: String, coin: Scanner.SpendableUtxo) -> Unit,
+    onCreate: (amount: Long, rate: Double, minPeers: Int, maxPeers: Int, hours: Int, password: String, maxInputs: Int,
+               coins: List<Scanner.SpendableUtxo>) -> Unit,
 ) {
+    var taproot by remember { mutableStateOf(false) }
+    var inputsText by remember { mutableStateOf("5") }
+    val maxInputs = inputsText.toIntOrNull()
+    val type = if (taproot) ScriptType.P2TR else ScriptType.P2WPKH
     var amountText by remember { mutableStateOf(if (allowTest) "1000" else "100000") }
     var rateText by remember { mutableStateOf("1") }
     var peersText by remember { mutableStateOf("5") }
@@ -360,11 +420,12 @@ private fun CreatePool(
         peers == null || peers !in Protocol.MIN_PEERS..Protocol.MAX_PEERS -> "Most people: ${Protocol.MIN_PEERS} to ${Protocol.MAX_PEERS}."
         minPeers == null || minPeers < Protocol.MIN_PEERS || minPeers > peers -> "Fewest people: ${Protocol.MIN_PEERS} to $peers (the most)."
         hours == null || hours !in 1..72 -> "Open for 1 to 72 hours."
+        maxInputs == null || maxInputs !in 1..Protocol.MAX_INPUTS -> "Coins per person: 1 to ${Protocol.MAX_INPUTS}."
         else -> null
     }
     if (pickCoin && error == null) {
-        CoinPicker(vm, accent, "Your coin for the pool", amount!!, rate!!, onCancel = { pickCoin = false }) { u ->
-            onCreate(amount, rate, minPeers!!, peers!!, hours!!, password, u)
+        CoinPicker(vm, accent, "Your coins for the pool", amount!!, rate!!, type, maxInputs!!, onCancel = { pickCoin = false }) { u ->
+            onCreate(amount, rate, minPeers!!, peers!!, hours!!, password, maxInputs, u)
         }
         return
     }
@@ -375,21 +436,40 @@ private fun CreatePool(
             value = v, onValueChange = set, label = { Text(label, style = MaterialTheme.typography.bodySmall) },
             singleLine = true, textStyle = MaterialTheme.typography.bodyMedium,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), modifier = Modifier.fillMaxWidth())
+        // The pool's one address type: its coins, mixed outputs and change are all of it.
+        Text("Address type", style = MaterialTheme.typography.bodyMedium, color = TextMain)
+        listOf(false to "Native SegWit (bc1q)", true to "Taproot (bc1p)").forEach { (t, label) ->
+            val sel = taproot == t
+            val can = !t || vm.taprootPools()
+            TextButton(onClick = { if (can) taproot = t }, enabled = can, modifier = Modifier.fillMaxWidth()) {
+                Text((if (sel) "● " else "○ ") + label + if (!can) " — turn on Taproot in settings" else "",
+                    color = if (sel) accent else if (can) TextMain else TextFaint,
+                    style = MaterialTheme.typography.bodySmall, modifier = Modifier.fillMaxWidth())
+            }
+        }
+        Text(if (taproot) "Only Taproot coins can join, and everyone gets Taproot outputs back."
+            else "Only native SegWit coins can join, and everyone gets native SegWit outputs back.",
+            color = TextFaint, style = MaterialTheme.typography.bodySmall)
         field("amount per person (sats)", amountText) { amountText = it }
         amount?.let { Text("= ${"%.8f".format(it / 1e8)} BTC", color = TextFaint, style = MaterialTheme.typography.bodySmall) }
         field("fee rate (sat/vB)", rateText) { rateText = it }
         field("fewest people to close (${Protocol.MIN_PEERS}–${Protocol.MAX_PEERS - 1})", minText) { minText = it }
         field("most people (${Protocol.MIN_PEERS}–${Protocol.MAX_PEERS})", peersText) { peersText = it }
         field("open for (hours)", hoursText) { hoursText = it }
+        field("most coins per person (1–${Protocol.MAX_INPUTS})", inputsText) { inputsText = it }
+        Text(if (!taproot && maxInputs == 1) "One coin each: Kilowallet versions before 0.27 can join it too."
+            else "Only Kilowallet 0.27 or newer sees this pool.",
+            color = TextFaint, style = MaterialTheme.typography.bodySmall)
         OutlinedTextField(value = password, onValueChange = { password = it },
             label = { Text("password (optional: makes it private 🔒)", style = MaterialTheme.typography.bodySmall) },
             singleLine = true, textStyle = MaterialTheme.typography.bodyMedium, modifier = Modifier.fillMaxWidth())
         if (password.isNotEmpty()) Text("Only people you give this password to can join. It is not announced anywhere.",
             color = TextFaint, style = MaterialTheme.typography.bodySmall)
         if (amount != null && rate != null && rate >= 1.0) {
-            val withChange = CoinjoinTx.feeShare(rate, true); val exact = CoinjoinTx.feeShare(rate, false)
-            Text("Each person pays their own fee, the same however many join: $withChange sats with change, " +
-                "$exact without. A coin of exactly ${groupSats(amount + exact)} sats leaves no change " +
+            val withChange = CoinjoinTx.feeShare(rate, true, 1, type); val exact = CoinjoinTx.feeShare(rate, false, 1, type)
+            Text("Each person pays their own fee, the same however many join: with one coin $withChange sats with change, " +
+                "$exact without (each extra coin adds ${"%.0f".format(java.util.Locale.ROOT, kotlin.math.ceil(rate * CoinjoinTx.inputVb(type)))}). " +
+                "A coin of exactly ${groupSats(amount + exact)} sats leaves no change " +
                 "(the best for privacy); a bit more than that, up to ${groupSats(amount + withChange + CoinjoinTx.DUST)}, " +
                 "also goes in without change and the rest goes to the miners.",
                 color = TextFaint, style = MaterialTheme.typography.bodySmall)
@@ -401,7 +481,7 @@ private fun CreatePool(
                 shape = RoundedCornerShape(12.dp), modifier = Modifier.weight(1f)) { Text("CANCEL") }
             Button(onClick = { pickCoin = true }, enabled = error == null,
                 colors = ButtonDefaults.buttonColors(containerColor = accent, contentColor = Ink),
-                shape = RoundedCornerShape(12.dp), modifier = Modifier.weight(1f)) { Text("CHOOSE COIN") }
+                shape = RoundedCornerShape(12.dp), modifier = Modifier.weight(1f)) { Text("CHOOSE COINS") }
         }
     }
 }
@@ -426,7 +506,8 @@ private fun MyPoolCard(
     fun act(f: () -> Unit) = scope.launch { withContext(Dispatchers.IO) { runCatching(f) }.onFailure { onMessage(it.message ?: "failed") } }
     Panel(accent = color) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("${groupSats(st.terms.amount)} sats", style = MaterialTheme.typography.titleMedium, color = TextMain, modifier = Modifier.weight(1f))
+            Text("${groupSats(st.terms.amount)} sats" + if (st.terms.script == ScriptType.P2TR) " · Taproot" else "",
+                style = MaterialTheme.typography.titleMedium, color = TextMain, modifier = Modifier.weight(1f))
             Text((if (st.terms.private) "🔒 " else "") + (if (st.creator) "your pool" else "joined"), style = MaterialTheme.typography.bodySmall, color = TextFaint)
         }
         val people = if (st.round.isNotEmpty()) st.round.size else st.seats.size
@@ -441,9 +522,10 @@ private fun MyPoolCard(
             PoolSession.Phase.ABORTED -> "Cancelled: ${st.reason}. Your coin did not move."
             PoolSession.Phase.REJECTED -> "Refused: ${st.reason}"
         }, style = MaterialTheme.typography.bodySmall, color = color)
-        Text("your coin ${groupSats(st.seat.coin.value)} → ${groupSats(st.terms.amount)} mixed" +
+        Text((if (st.seat.coins.size > 1) "your ${st.seat.coins.size} coins " else "your coin ") +
+            "${groupSats(st.seat.inputValue)} → ${groupSats(st.terms.amount)} mixed" +
             (if (st.seat.changeValue > 0) " + ${groupSats(st.seat.changeValue)} change" else "") +
-            " · fee ${groupSats(st.seat.coin.value - st.terms.amount - st.seat.changeValue)}",
+            " · fee ${groupSats(st.seat.inputValue - st.terms.amount - st.seat.changeValue)}",
             style = MaterialTheme.typography.bodySmall, color = TextFaint)
         Spacer(Modifier.height(8.dp))
 
@@ -514,11 +596,11 @@ private fun MyPoolCard(
             }
             PoolSession.Phase.SIGNING -> {
                 val plan = session?.plan()
-                if (st.postedSig) Text("Signed. Waiting for the others (${st.sigs.size}/${plan?.coins?.size ?: "?"})…",
+                if (st.postedSig) Text("Signed. Waiting for the others (${st.sigs.size}/${plan?.coins?.size ?: "?"} coins)…",
                     color = TextSoft, style = MaterialTheme.typography.bodySmall)
                 else {
                     plan?.let {
-                        Explain("Checked: ${it.coins.size} people, ${it.outputs.count { o -> o.value == st.terms.amount }} identical outputs of " +
+                        Explain("Checked: ${st.round.size} people (${it.coins.size} coins), ${it.outputs.count { o -> o.value == st.terms.amount }} identical outputs of " +
                             "${groupSats(st.terms.amount)} sats, one of them yours; " +
                             (if (st.seat.changeValue > 0) "your change is right" else "no change (an exact coin)") +
                             "; total fee ${groupSats(it.fee)} sats.")
@@ -526,8 +608,8 @@ private fun MyPoolCard(
                     }
                     btn("SIGN", true, Modifier.fillMaxWidth()) {
                         runCatching { vm.seedDecryptCipher() }.onSuccess { cipher ->
-                            Biometric.authenticate(activity, "Sign the coinjoin", "Unlock to sign your coin's input", cipher,
-                                onSuccess = { authed -> act { session?.sign(vm.coinjoinKey(authed, st.coinPath)) } },
+                            Biometric.authenticate(activity, "Sign the coinjoin", "Unlock to sign your coins' inputs", cipher,
+                                onSuccess = { authed -> act { session?.sign(vm.coinjoinKeys(authed, st.coinPaths)) } },
                                 onError = onMessage)
                         }.onFailure { onMessage(it.message ?: "could not unlock") }
                     }
@@ -559,9 +641,12 @@ private fun MyPoolCard(
  * coin (it is what the round will pay), it says nothing about how busy the mempool is now.
  */
 @Composable
-private fun ExactCoinPanel(vm: WalletViewModel, accent: Color, exact: Long, onDone: () -> Unit) {
+private fun ExactCoinPanel(vm: WalletViewModel, accent: Color, exact: Long, tag: ScriptType?, onDone: () -> Unit) {
     val activity = LocalContext.current as FragmentActivity
     val state by vm.state.collectAsState()
+    var sources by remember { mutableStateOf<List<Scanner.SpendableUtxo>?>(null) }
+    val picked = remember { mutableStateListOf<Scanner.SpendableUtxo>() }
+    LaunchedEffect(Unit) { sources = runCatching { vm.exactCoinSources() }.getOrDefault(emptyList()) }
     var suggested by remember { mutableStateOf<Double?>(null) }
     var asked by remember { mutableStateOf(false) }
     var rateText by remember { mutableStateOf("") }
@@ -575,9 +660,31 @@ private fun ExactCoinPanel(vm: WalletViewModel, accent: Color, exact: Long, onDo
         SectionLabel("Exact coin · ${groupSats(exact)} sats", accent)
         Spacer(Modifier.height(6.dp))
         if (!started) {
-            Explain("A payment to yourself of exactly ${groupSats(exact)} sats. It needs one confirmation " +
-                "before it can join; then it goes in with no change. Choose what this payment pays to get mined:")
+            Explain("A payment to yourself of exactly ${groupSats(exact)} sats, to a fresh " +
+                (if (tag == ScriptType.P2TR) "Taproot (bc1p)" else "native SegWit (bc1q)") + " address of this wallet. It needs one " +
+                "confirmation before it can join; then it goes in with no change.")
             Spacer(Modifier.height(6.dp))
+            Text("Pay it with (none ticked: the biggest coins first)", color = TextMain, style = MaterialTheme.typography.bodySmall)
+            sources?.let { list ->
+                if (list.isEmpty()) Text("No confirmed coin to pay it with.", color = Warn, style = MaterialTheme.typography.bodySmall)
+                list.forEach { u ->
+                    val sel = picked.any { it.txid == u.txid && it.vout == u.vout }
+                    Row(Modifier.fillMaxWidth().clickable {
+                        if (sel) picked.removeAll { it.txid == u.txid && it.vout == u.vout } else picked.add(u)
+                    }.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(if (sel) "☑" else "☐", color = if (sel) accent else TextFaint, modifier = Modifier.width(26.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("${groupSats(u.value)} sats · ${vm.coinKind(u)}", color = if (sel) accent else TextMain,
+                                style = MaterialTheme.typography.bodySmall)
+                            Text(vm.coinAddress(u)?.let { shortAddress(it) } ?: "", color = TextFaint, style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+                if (picked.isNotEmpty()) Text("ticked: ${groupSats(picked.sumOf { it.value })} sats", color = accent,
+                    style = MaterialTheme.typography.bodySmall)
+            } ?: Text("reading your coins…", color = TextSoft, style = MaterialTheme.typography.bodySmall)
+            Spacer(Modifier.height(6.dp))
+            Text("What this payment pays to get mined:", color = TextMain, style = MaterialTheme.typography.bodySmall)
             Text(when {
                 !asked -> "asking your node how busy the mempool is…"
                 suggested != null -> "your node suggests ${fmtRate(suggested!!)} sat/vB for the next few blocks"
@@ -592,7 +699,7 @@ private fun ExactCoinPanel(vm: WalletViewModel, accent: Color, exact: Long, onDo
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = onDone, colors = ButtonDefaults.buttonColors(containerColor = PanelSoft, contentColor = TextSoft),
                     shape = RoundedCornerShape(12.dp), modifier = Modifier.weight(1f)) { Text("CANCEL") }
-                Button(onClick = { rate?.let { vm.prepareExactCoin(exact, it); started = true } }, enabled = rate != null,
+                Button(onClick = { rate?.let { vm.prepareExactCoin(exact, it, tag, picked.toList()); started = true } }, enabled = rate != null,
                     colors = ButtonDefaults.buttonColors(containerColor = accent, contentColor = Ink),
                     shape = RoundedCornerShape(12.dp), modifier = Modifier.weight(1f)) { Text("PREPARE") }
             }
@@ -600,8 +707,10 @@ private fun ExactCoinPanel(vm: WalletViewModel, accent: Color, exact: Long, onDo
         }
         when (val p = state.sendPhase) {
             is SendPhase.Review -> {
-                Text("from ${p.draft.inputs.size} coin(s) · fee ${groupSats(p.draft.fee)} sats" +
-                    (if (p.draft.change > 0) " · change ${groupSats(p.draft.change)}" else ""),
+                Text("to ${shortAddress(p.draft.toAddress)} · from ${p.draft.inputs.size} coin(s) · fee ${groupSats(p.draft.fee)} sats",
+                    color = TextSoft, style = MaterialTheme.typography.bodySmall)
+                if (p.draft.change > 0) Text("change ${groupSats(p.draft.change)} sats back to " +
+                    (p.draft.changeAddress?.let { shortAddress(it) } ?: "a fresh address of yours"),
                     color = TextSoft, style = MaterialTheme.typography.bodySmall)
                 val concern = remember(p.draft) { vm.feeConcern(p.draft) }
                 var feeOk by remember(p.draft) { mutableStateOf(false) }

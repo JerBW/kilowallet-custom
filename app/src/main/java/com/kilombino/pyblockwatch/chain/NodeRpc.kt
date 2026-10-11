@@ -321,10 +321,16 @@ class NodeRpcBackend(private val node: RpcNode) {
 
     fun listUnspent(sh: String): List<ElectrumClient.Utxo> = utxos[sh].orEmpty()
 
-    /** Any coin, ours or not, unspent with exactly [value] sats (mempool spends count as spent). */
-    fun isUnspent(txid: String, vout: Int, value: Long): Boolean {
+    /**
+     * Any coin, ours or not, unspent with exactly [value] sats (mempool spends count as spent),
+     * and, when [script] is given, locked to exactly that scriptPubKey.
+     */
+    fun isUnspent(txid: String, vout: Int, value: Long, script: ByteArray? = null): Boolean {
         val o = call("gettxout", txid, vout, true) as? JSONObject ?: return false
-        return Math.round(o.getDouble("value") * 1e8) == value
+        if (Math.round(o.getDouble("value") * 1e8) != value) return false
+        if (script == null) return true
+        val hex = o.optJSONObject("scriptPubKey")?.optString("hex") ?: return false
+        return hex.equals(script.joinToString("") { "%02x".format(it) }, ignoreCase = true)
     }
 
     fun estimateFeePerKb(blocks: Int): Double = runCatching {

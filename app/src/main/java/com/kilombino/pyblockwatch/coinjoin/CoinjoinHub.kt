@@ -101,7 +101,7 @@ object CoinjoinHub {
         load(ctx)
         return synchronized(this) {
             sessions.values.filter { !it.done && it.state.phase != PoolSession.Phase.BROADCAST }
-                .map { it.state.seat.coin.outpoint }.toSet()
+                .flatMap { st -> st.state.seat.coins.map { it.outpoint } }.toSet()
         }
     }
 
@@ -116,12 +116,16 @@ object CoinjoinHub {
 
     // ------------------------------------------------------------------------------- joining
 
-    /** A coin of ours, with the key that spends it and fresh addresses for the round. */
+    /** One of our coins for a seat, with the key that spends it. */
+    class PickCoin(val txid: String, val vout: Int, val value: Long, val coinKey: Bip32Priv.ExtendedPrivKey, val coinPath: String)
+
+    /** Our coins (all of [type]), with fresh addresses of that type for the round. */
     class Pick(
-        val txid: String, val vout: Int, val value: Long,
-        val coinKey: Bip32Priv.ExtendedPrivKey, val coinPath: String,
+        val coins: List<PickCoin>, val type: ScriptType,
         val mixScript: ByteArray, val changeScript: ByteArray,
-    )
+    ) {
+        fun txCoins(): List<CoinjoinTx.Coin> = coins.map { CoinjoinTx.Coin(it.txid, it.vout, it.value, it.coinKey.publicKey(), type) }
+    }
 
     private fun add(ctx: Context, st: PoolSession.State): PoolSession {
         val s = PoolSession(env(ctx, st), st)
@@ -134,21 +138,21 @@ object CoinjoinHub {
     /** Open a new pool with our coin as the first seat. */
     fun create(
         ctx: Context, pick: Pick, amount: Long, feeRate: Double, maxPeers: Int, hours: Int,
-        minPeers: Int = Protocol.MIN_PEERS, password: String? = null,
+        minPeers: Int = Protocol.MIN_PEERS, password: String? = null, maxInputs: Int = 1,
     ): PoolSession.State {
-        val (terms, secret) = PoolSession.newPool(amount, feeRate, maxPeers, hours, minPeers, !password.isNullOrEmpty())
-        val coin = CoinjoinTx.Coin(pick.txid, pick.vout, pick.value, pick.coinKey.publicKey())
-        val st = PoolSession.newState(terms, true, secret, coin, pick.coinKey.key, pick.coinPath, pick.mixScript, pick.changeScript,
-            password?.ifEmpty { null })
+        val (terms, secret) = PoolSession.newPool(amount, feeRate, maxPeers, hours, minPeers, !password.isNullOrEmpty(),
+            pick.type, maxInputs)
+        val st = PoolSession.newState(terms, true, secret, pick.txCoins(), pick.coins.map { it.coinKey.key }, pick.coins.map { it.coinPath },
+            pick.mixScript, pick.changeScript, password?.ifEmpty { null })
         add(ctx, st)
         CoinjoinAlerts.follow(ctx, st)
         return st
     }
 
     fun join(ctx: Context, terms: Protocol.Terms, pick: Pick, password: String? = null): PoolSession.State {
-        val coin = CoinjoinTx.Coin(pick.txid, pick.vout, pick.value, pick.coinKey.publicKey())
-        val st = PoolSession.newState(terms, false, null, coin, pick.coinKey.key, pick.coinPath, pick.mixScript, pick.changeScript,
-            password?.ifEmpty { null })
+        require(pick.type == terms.script) { "these coins are not of the pool's address type" }
+        val st = PoolSession.newState(terms, false, null, pick.txCoins(), pick.coins.map { it.coinKey.key }, pick.coins.map { it.coinPath },
+            pick.mixScript, pick.changeScript, password?.ifEmpty { null })
         add(ctx, st)
         return st
     }
@@ -193,7 +197,7 @@ object CoinjoinHub {
         val open = fetchPools().filter { it.amount >= Protocol.MIN_AMOUNT && !it.private && it.id !in ours }
         open.maxOfOrNull { it.createdAt }?.let { prefs(ctx).edit().putLong(KEY_LAST_POOL_SEEN, it).apply() }
         open.firstOrNull()?.let { t -> notify(ctx, t.id.hashCode(), "Coinjoin pool open now",
-            "${sats(t.amount)} sats · ${t.peers}/${t.maxPeers} people · ${t.feeRate} sat/vB") }
+            "${sats(t.amount)} sats${kind(t)} · ${t.peers}/${t.maxPeers} people · ${t.feeRate} sat/vB") }
     }
 
     /** For the background watcher: notify pools opened since the last look, other than ours. */
@@ -210,7 +214,7 @@ object CoinjoinHub {
         }
         pools.maxOfOrNull { it.createdAt }?.let { p.edit().putLong(KEY_LAST_POOL_SEEN, it).apply() }
         for (t in pools.take(3)) notify(ctx, t.id.hashCode(), "New coinjoin pool" + if (t.amount < Protocol.MIN_AMOUNT) " (test)" else "",
-            "${sats(t.amount)} sats · ${t.peers}/${t.maxPeers} people · ${t.feeRate} sat/vB")
+            "${sats(t.amount)} sats${kind(t)} · ${t.peers}/${t.maxPeers} people · ${t.feeRate} sat/vB")
     }
 
     // ------------------------------------------------------------------------------- environment
@@ -225,7 +229,7 @@ object CoinjoinHub {
                 return try { c.connect(); f(c) } finally { c.close() }
             }
             override fun coinUnspent(coin: CoinjoinTx.Coin): Boolean = electrum { c ->
-                c.isUnspent(Address.electrumScriptHash(coin.script), coin.txid, coin.vout, coin.value)
+                c.isUnspent(Address.electrumScriptHash(coin.script), coin.txid, coin.vout, coin.value, coin.script)
             }
             override fun broadcast(rawHex: String): String = electrum { it.broadcast(rawHex) }
             override fun confirmations(txid: String): Int? = electrum { c ->
@@ -248,6 +252,8 @@ object CoinjoinHub {
     }
 
     private fun sats(v: Long): String = "%,d".format(v).replace(',', ' ')
+    /** " · Taproot" for a Taproot pool (bc1p coins only); nothing for the usual bc1q ones. */
+    private fun kind(t: Protocol.Terms): String = if (t.script == ScriptType.P2TR) " · Taproot" else ""
 
     private fun onEvent(ctx: Context, st: PoolSession.State, e: PoolSession.Event) {
         alert(ctx, st, e)
@@ -308,6 +314,6 @@ object CoinjoinHub {
         (ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).notify(id, n)
     }
 
-    /** Only P2WPKH wallets can join: every input and output must look the same. */
+    /** A hot wallet's own account is native SegWit; its Taproot one (if on) can do Taproot pools. */
     fun supported(store: Store): Boolean = store.scriptType == ScriptType.P2WPKH
 }

@@ -565,6 +565,11 @@ fun SendSheet(vm: WalletViewModel, accent: Color, onClose: () -> Unit) {
                         color = Warn, style = MaterialTheme.typography.bodySmall)
                 RowLine("Fee", "${groupSats(d.fee)} sats", accent)
                 RowLine("Change", if (d.change > 0) "${groupSats(d.change)} sats" else "—", accent)
+                d.changeAddress?.let {
+                    Text("back to your ${if (it.startsWith("bc1p")) "Taproot" else "SegWit"} address ${shortAddress(it)}",
+                        color = TextFaint, style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.End)
+                }
                 RowLine("Inputs", "${d.inputs.size}", accent)
                 val concern = remember(d) { vm.feeConcern(d) }
                 var feeOk by remember(d) { mutableStateOf(false) }

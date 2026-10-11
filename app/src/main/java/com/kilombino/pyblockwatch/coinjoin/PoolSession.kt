@@ -60,11 +60,11 @@ class PoolSession(private val env: Env, private val s: State) {
         var poolSecret: String?,          // hex; known to the creator from the start, to members once welcomed
         val joinSecret: String,           // hex; the one-off key this wallet joined with
         var token: String?,               // our seat's secret token
-        val seat: Protocol.Seat,          // our coin and change, as signed at join time
-        val joinProof: String,            // hex DER, sent with the join request
+        val seat: Protocol.Seat,          // our coins and change, as signed at join time
+        val joinProofs: List<String>,     // hex DER, one per coin, sent with the join request
         val changeSig: String,            // hex DER
         val mixScript: ByteArray,
-        val coinPath: String,             // BIP-32 path of our coin's key, to sign at the end
+        val coinPaths: List<String>,      // BIP-32 paths of our coins' keys, to sign at the end
         val pwKey: String? = null,        // creator of a private pool: key derived from its password
         val pwProof: String? = null,      // joiner of a private pool: proof sent with the join
         var phase: Phase = Phase.JOINING,
@@ -90,10 +90,13 @@ class PoolSession(private val env: Env, private val s: State) {
         var warnedExpiry: Boolean = false, // the under-an-hour warning was given
     ) {
         val poolId: String get() = terms.id
+        val joinProof: String get() = joinProofs.first()
+        val coinPath: String get() = coinPaths.first()
         fun toJson(): JSONObject = JSONObject()
             .put("terms", terms.toJson().put("created_at", terms.createdAt))
             .put("creator", creator).put("pool_secret", poolSecret ?: "").put("join_secret", joinSecret)
             .put("token", token ?: "").put("seat", seat.toJson()).put("join_proof", joinProof)
+            .put("join_proofs", org.json.JSONArray(joinProofs)).put("coin_paths", org.json.JSONArray(coinPaths))
             .put("change_sig", changeSig).put("mix_script", mixScript.toHex()).put("coin_path", coinPath)
             .put("pw_key", pwKey ?: "").put("pw_proof", pwProof ?: "")
             .put("phase", phase.name).put("reason", reason)
@@ -116,19 +119,26 @@ class PoolSession(private val env: Env, private val s: State) {
             }
             fun parse(o: JSONObject): State {
                 val t = o.getJSONObject("terms")
+                val v = t.optInt("v", Protocol.V1)
                 val terms = Protocol.Terms(t.getString("id"), t.getString("public_key"), t.getLong("denomination"),
                     t.getDouble("fee_rate"), t.getInt("max_peers"), t.getLong("timeout"), t.getString("state"),
                     t.optInt("peers"), t.optLong("created_at"), t.optInt("min_peers", Protocol.MIN_PEERS),
-                    t.optBoolean("private", false))
+                    t.optBoolean("private", false), v,
+                    if (v == Protocol.V1) com.kilombino.pyblockwatch.crypto.ScriptType.P2WPKH
+                    else Protocol.parseScript(t.getString("script")) ?: error("unknown script"),
+                    if (v == Protocol.V1) 1 else t.getInt("max_inputs"))
+                val type = terms.script
+                fun list(k: String, one: String): List<String> = o.optJSONArray(k)?.let { a -> (0 until a.length()).map { a.getString(it) } }
+                    ?: listOf(o.getString(one))
                 val outs = o.optJSONArray("outputs"); val acc = o.optJSONArray("accepts")
                 return State(
                     terms, o.getBoolean("creator"), o.str("pool_secret"), o.getString("join_secret"), o.str("token"),
-                    Protocol.Seat.parse(o.getJSONObject("seat")), o.getString("join_proof"), o.getString("change_sig"),
-                    Hashes.hexToBytes(o.getString("mix_script")), o.getString("coin_path"),
+                    Protocol.Seat.parse(o.getJSONObject("seat"), type), list("join_proofs", "join_proof"), o.getString("change_sig"),
+                    Hashes.hexToBytes(o.getString("mix_script")), list("coin_paths", "coin_path"),
                     o.str("pw_key"), o.str("pw_proof"),
                     Phase.valueOf(o.getString("phase")), o.optString("reason"),
-                    Protocol.parseSeats(o.getJSONArray("seats")).toMutableList(),
-                    Protocol.parseSeats(o.getJSONArray("round")).toMutableList(),
+                    Protocol.parseSeats(o.getJSONArray("seats"), type).toMutableList(),
+                    Protocol.parseSeats(o.getJSONArray("round"), type).toMutableList(),
                     o.optInt("roster_seq"), o.str("vote_id"), o.str("vote_by"), o.optLong("vote_deadline"), o.optLong("phase_deadline"),
                     (0 until (outs?.length() ?: 0)).map { outs!!.getString(it) }.toMutableSet(),
                     o.map("sigs"), o.optBoolean("posted_output"), o.optBoolean("posted_sig"), o.str("voted_on"),
@@ -252,6 +262,7 @@ class PoolSession(private val env: Env, private val s: State) {
     private fun sendJoin() {
         val o = JSONObject().put("type", "join").put("seat", s.seat.toJson())
             .put("proof", s.joinProof).put("change_sig", s.changeSig)
+        if (s.joinProofs.size > 1) o.put("proofs", org.json.JSONArray(s.joinProofs))
         s.pwProof?.let { o.put("pw", it) }
         direct(terms.poolPub, o, joinKey)
     }
@@ -342,20 +353,27 @@ class PoolSession(private val env: Env, private val s: State) {
                 Protocol.passwordProof(Hashes.hexToBytes(k), from).toByteArray(), o.optString("pw").toByteArray())
             if (!ok) return reject(from, "wrong password")
         }
-        val seat = runCatching { Protocol.Seat.parse(o.getJSONObject("seat")) }.getOrNull() ?: return reject(from, "malformed request")
-        val coin = seat.coin
-        if (s.seats.any { it.coin.outpoint == coin.outpoint }) return reject(from, "that coin already has a seat")
-        if (!CoinjoinTx.checkOwnership(terms.id, from, coin, Hashes.hexToBytes(o.getString("proof"))))
+        val seat = runCatching { Protocol.Seat.parse(o.getJSONObject("seat"), terms.script) }.getOrNull() ?: return reject(from, "malformed request")
+        val coins = seat.coins
+        if (coins.size > terms.maxInputs) return reject(from, "this pool takes at most ${terms.maxInputs} coin(s) per person")
+        val outpoints = coins.map { it.outpoint }
+        if (outpoints.toSet().size != outpoints.size) return reject(from, "the same coin twice")
+        if (s.seats.any { st -> st.coins.any { it.outpoint in outpoints } }) return reject(from, "that coin already has a seat")
+        val proofs = o.optJSONArray("proofs")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: listOf(o.getString("proof"))
+        if (proofs.size != coins.size) return reject(from, "one proof per coin is needed")
+        if (coins.indices.any { !CoinjoinTx.checkOwnership(terms.id, from, coins[it], Hashes.hexToBytes(proofs[it])) })
             return reject(from, "the coin's signature is wrong")
-        val expected = CoinjoinTx.change(coin.value, terms.amount, terms.feeRate) ?: return reject(from, "the coin is too small for this pool")
+        val expected = CoinjoinTx.change(seat.inputValue, terms.amount, terms.feeRate, coins.size, terms.script)
+            ?: return reject(from, "the coin is too small for this pool")
         if (seat.changeValue != expected) return reject(from, "the change does not match the pool's fee")
         if ((expected > 0) != (seat.changeScript != null)) return reject(from, "the change does not match the pool's fee")
+        seat.changeScript?.let { if (!CoinjoinTx.isType(it, terms.script)) return reject(from, "the change is of another address type") }
         val changeOk = runCatching {
-            Ecdsa.verify(Secp256k1.decompress(coin.pubkey), Protocol.changeMessage(terms.id, coin, seat.changeScript, seat.changeValue),
+            Ecdsa.verify(Secp256k1.decompress(seat.coin.pubkey), Protocol.changeMessage(terms.id, coins, seat.changeScript, seat.changeValue),
                 CoinjoinTx.parseDer(Hashes.hexToBytes(o.getString("change_sig"))))
         }.getOrDefault(false)
         if (!changeOk) return reject(from, "the change's signature is wrong")
-        if (!runCatching { env.coinUnspent(coin) }.getOrDefault(false)) return reject(from, "that coin is not unspent on the chain")
+        if (coins.any { !runCatching { env.coinUnspent(it) }.getOrDefault(false) }) return reject(from, "that coin is not unspent on the chain")
         val token = randomHex(16)
         val th = Protocol.tokenHash(token)
         val placed = seat.copy(tokenHash = th)
@@ -405,7 +423,7 @@ class PoolSession(private val env: Env, private val s: State) {
                 val seq = o.optInt("seq")
                 if (s.creator || seq <= s.rosterSeq) return
                 s.rosterSeq = seq
-                val seats = Protocol.parseSeats(o.getJSONArray("seats"))
+                val seats = Protocol.parseSeats(o.getJSONArray("seats"), terms.script)
                 val before = s.seats.size
                 s.seats = seats.toMutableList()
                 // Removed from the roster (e.g. our coin was spent): nothing more to do here.
@@ -438,7 +456,7 @@ class PoolSession(private val env: Env, private val s: State) {
             }
             "closing" -> {
                 if (s.phase !in setOf(Phase.OPEN, Phase.VOTING)) return
-                val seats = Protocol.parseSeats(o.getJSONArray("seats"))
+                val seats = Protocol.parseSeats(o.getJSONArray("seats"), terms.script)
                 if (myTokenHash == null || seats.none { it.tokenHash == myTokenHash }) {
                     s.phase = Phase.ABORTED; s.reason = "the round closed without us"; save()
                     env.event(Event.Aborted(s.poolId, s.reason)); return
@@ -452,7 +470,7 @@ class PoolSession(private val env: Env, private val s: State) {
             "output" -> {
                 if (s.phase != Phase.CLOSING) return
                 val script = o.getString("script")
-                if (!script.matches(Regex("0014[0-9a-f]{40}"))) return
+                if (!script.matches(Regex(if (terms.script == com.kilombino.pyblockwatch.crypto.ScriptType.P2TR) "5120[0-9a-f]{64}" else "0014[0-9a-f]{40}"))) return
                 s.outputs.add(script); save()
                 if (s.outputs.size > s.round.size) return abort("more mixed outputs than people")
                 if (s.outputs.size == s.round.size) toSigning()
@@ -513,7 +531,7 @@ class PoolSession(private val env: Env, private val s: State) {
     private fun buildPlan(): CoinjoinTx.Plan? {
         if (s.round.size < Protocol.MIN_PEERS || s.outputs.size != s.round.size) return null
         return CoinjoinTx.plan(
-            s.round.map { it.coin },
+            s.round.flatMap { it.coins },
             s.outputs.map { Hashes.hexToBytes(it) },
             s.round.filter { it.changeScript != null && it.changeValue > 0 }.map { TxBuilder.Output(it.changeScript!!, it.changeValue) },
             terms.amount,
@@ -523,22 +541,28 @@ class PoolSession(private val env: Env, private val s: State) {
     private fun toSigning() {
         val plan = runCatching { buildPlan() }.getOrElse { return abort("the transaction does not add up: ${it.message}") } ?: return
         val change = s.seat.changeScript?.let { TxBuilder.Output(it, s.seat.changeValue) }
-        CoinjoinTx.checkOurs(plan, s.mixScript, change, terms.amount, terms.feeRate)?.let { return abort(it) }
+        CoinjoinTx.checkOurs(plan, s.mixScript, change, terms.amount, terms.feeRate, s.round.map { it.coins.size })?.let { return abort(it) }
         s.phase = Phase.SIGNING; s.phaseDeadline = env.now() + Protocol.SIGN_SECONDS; save()
         env.event(Event.SignNeeded(s.poolId, plan.coins.size))
     }
 
-    /** The user approved: sign our input with [privateKey] (derived from [State.coinPath]). */
+    /** The user approved: sign our one input with [privateKey] (derived from [State.coinPath]). */
+    fun sign(privateKey: BigInteger) = sign(listOf(privateKey))
+
+    /** The user approved: sign each of our inputs, [privateKeys] in the order of [State.coinPaths]. */
     @Synchronized
-    fun sign(privateKey: BigInteger) {
+    fun sign(privateKeys: List<BigInteger>) {
         check(s.phase == Phase.SIGNING) { "nothing to sign right now" }
+        require(privateKeys.size == s.seat.coins.size) { "one key per coin is needed" }
         val plan = buildPlan() ?: error("the transaction is not complete")
         val change = s.seat.changeScript?.let { TxBuilder.Output(it, s.seat.changeValue) }
-        CoinjoinTx.checkOurs(plan, s.mixScript, change, terms.amount, terms.feeRate)?.let { error(it) }
-        val mine = plan.coins.first { it.outpoint == s.seat.coin.outpoint }
-        val sig = CoinjoinTx.sign(plan, mine, privateKey).toHex()
-        s.sigs[mine.outpoint] = sig
-        check(channel(JSONObject().put("type", "sig").put("outpoint", mine.outpoint).put("sig", sig))) { "the relay did not take our signature" }
+        CoinjoinTx.checkOurs(plan, s.mixScript, change, terms.amount, terms.feeRate, s.round.map { it.coins.size })?.let { error(it) }
+        s.seat.coins.forEachIndexed { i, c ->
+            val mine = plan.coins.first { it.outpoint == c.outpoint }
+            val sig = CoinjoinTx.sign(plan, mine, privateKeys[i]).toHex()
+            s.sigs[mine.outpoint] = sig
+            check(channel(JSONObject().put("type", "sig").put("outpoint", mine.outpoint).put("sig", sig))) { "the relay did not take our signature" }
+        }
         s.postedSig = true; save()
         maybeBroadcast(plan)
     }
@@ -666,32 +690,55 @@ class PoolSession(private val env: Env, private val s: State) {
             terms: Protocol.Terms, creator: Boolean, poolSecret: String?, coin: CoinjoinTx.Coin, coinKey: BigInteger,
             coinPath: String, mixScript: ByteArray, changeScript: ByteArray?,
             password: String? = null,
+        ): State = newState(terms, creator, poolSecret, listOf(coin), listOf(coinKey), listOf(coinPath), mixScript, changeScript, password)
+
+        /** [coins] with their [coinKeys] and [coinPaths], same order; the first one signs the change. */
+        fun newState(
+            terms: Protocol.Terms, creator: Boolean, poolSecret: String?, coins: List<CoinjoinTx.Coin>, coinKeys: List<BigInteger>,
+            coinPaths: List<String>, mixScript: ByteArray, changeScript: ByteArray?,
+            password: String? = null,
         ): State {
-            val changeValue = CoinjoinTx.change(coin.value, terms.amount, terms.feeRate) ?: error("this coin is too small for the pool")
+            require(coins.isNotEmpty() && coinKeys.size == coins.size && coinPaths.size == coins.size) { "one key and path per coin" }
+            require(coins.size <= terms.maxInputs) { "this pool takes at most ${terms.maxInputs} coin(s) per person" }
+            require(coins.all { it.type == terms.script }) { "these coins are not of the pool's address type" }
+            require(coins.map { it.outpoint }.toSet().size == coins.size) { "the same coin twice" }
+            require(CoinjoinTx.isType(mixScript, terms.script)) { "the mixed output is not of the pool's address type" }
+            val changeValue = CoinjoinTx.change(coins.sumOf { it.value }, terms.amount, terms.feeRate, coins.size, terms.script)
+                ?: error("these coins are too small for the pool")
             val cs = if (changeValue > 0) changeScript ?: error("a change address is needed") else null
+            cs?.let { require(CoinjoinTx.isType(it, terms.script)) { "the change is not of the pool's address type" } }
             val joinSecret = NostrEvent.newSecret()
             val joinPub = NostrEvent.pubOf(joinSecret)
-            val proof = CoinjoinTx.proveOwnership(terms.id, if (creator) terms.poolPub else joinPub, coin, coinKey).toHex()
-            val changeSig = Ecdsa.der(Ecdsa.sign(coinKey, Protocol.changeMessage(terms.id, coin, cs, changeValue))).toHex()
+            val proofs = coins.indices.map {
+                CoinjoinTx.proveOwnership(terms.id, if (creator) terms.poolPub else joinPub, coins[it], coinKeys[it]).toHex()
+            }
+            val changeSig = Ecdsa.der(Ecdsa.sign(coinKeys[0], Protocol.changeMessage(terms.id, coins, cs, changeValue))).toHex()
             return State(
                 terms = terms, creator = creator, poolSecret = poolSecret, joinSecret = joinSecret.toString(16),
-                token = null, seat = Protocol.Seat("", coin, cs, changeValue), joinProof = proof, changeSig = changeSig,
-                mixScript = mixScript, coinPath = coinPath,
+                token = null, seat = Protocol.Seat("", coins, cs, changeValue), joinProofs = proofs, changeSig = changeSig,
+                mixScript = mixScript, coinPaths = coinPaths,
                 pwKey = if (creator && terms.private) Protocol.passwordKey(terms.id, password ?: error("a private pool needs a password")).toHex() else null,
                 pwProof = if (!creator && terms.private)
                     Protocol.passwordProof(Protocol.passwordKey(terms.id, password ?: error("this pool needs its password")), joinPub) else null,
             )
         }
 
-        /** Terms for a new pool, with its own fresh key. Returns (terms, pool secret hex). */
+        /**
+         * Terms for a new pool, with its own fresh key. Returns (terms, pool secret hex). A native
+         * SegWit pool of one coin each is a v1 pool, which older wallets can join too; Taproot or
+         * several coins per person make it v2.
+         */
         fun newPool(amount: Long, feeRate: Double, maxPeers: Int, hours: Int, minPeers: Int = Protocol.MIN_PEERS,
-                    private: Boolean = false): Pair<Protocol.Terms, String> {
+                    private: Boolean = false, script: com.kilombino.pyblockwatch.crypto.ScriptType = com.kilombino.pyblockwatch.crypto.ScriptType.P2WPKH,
+                    maxInputs: Int = 1): Pair<Protocol.Terms, String> {
             val k = NostrEvent.newSecret()
             val id = ByteArray(8).also { SecureRandom().nextBytes(it) }.toHex()
             val now = System.currentTimeMillis() / 1000
             require(minPeers in Protocol.MIN_PEERS..maxPeers) { "the minimum must be between 2 and the maximum" }
+            require(maxInputs in 1..Protocol.MAX_INPUTS) { "1 to ${Protocol.MAX_INPUTS} coins per person" }
+            val v1 = script == com.kilombino.pyblockwatch.crypto.ScriptType.P2WPKH && maxInputs == 1
             return Protocol.Terms(id, NostrEvent.pubOf(k), amount, feeRate, maxPeers, now + hours * 3600L, "open", 1, now,
-                minPeers, private) to k.toString(16)
+                minPeers, private, if (v1) Protocol.V1 else Protocol.VERSION, script, maxInputs) to k.toString(16)
         }
     }
 }

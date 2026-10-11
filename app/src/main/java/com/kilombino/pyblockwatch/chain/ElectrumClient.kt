@@ -311,8 +311,9 @@ class ElectrumClient(
      * Electrum, by its scripthash; on a node by RPC, with gettxout: its watch-only wallet only
      * knows our own addresses, so listUnspent would say no to every coin that is not ours.
      */
-    fun isUnspent(scriptHash: String, txid: String, vout: Int, value: Long): Boolean {
-        node?.let { return it.isUnspent(txid, vout, value) }
+    fun isUnspent(scriptHash: String, txid: String, vout: Int, value: Long, script: ByteArray? = null): Boolean {
+        // By RPC the coin's own script is checked too (Electrum's scripthash already ties it to one).
+        node?.let { return it.isUnspent(txid, vout, value, script) }
         return listUnspent(scriptHash).any { it.txid == txid && it.vout == vout && it.value == value }
     }
 

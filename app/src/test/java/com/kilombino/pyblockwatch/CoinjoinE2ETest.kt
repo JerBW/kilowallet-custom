@@ -39,7 +39,10 @@ class CoinjoinE2ETest {
         val events = java.util.concurrent.CopyOnWriteArrayList<String>()
         override fun coinUnspent(coin: CoinjoinTx.Coin): Boolean {
             val o = rpc("gettxout", coin.txid, coin.vout, true) as? JSONObject ?: return false
-            return Math.round(o.getDouble("value") * 1e8) == coin.value
+            // The coin's own script, as the wallet's RPC path checks it: a coin claimed under the
+            // wrong address type does not match.
+            return Math.round(o.getDouble("value") * 1e8) == coin.value &&
+                o.getJSONObject("scriptPubKey").getString("hex") == coin.script.joinToString("") { "%02x".format(it) }
         }
         override fun broadcast(rawHex: String): String = rpc("sendrawtransaction", rawHex) as String
         override fun confirmations(txid: String): Int? {
@@ -57,6 +60,57 @@ class CoinjoinE2ETest {
     private fun key(seed: Int) = BigInteger.valueOf(1000L + seed)
     private fun pub(k: BigInteger) = Secp256k1.compress(Secp256k1.multiply(k, Secp256k1.G))
     private fun script(n: Long) = Address.scriptPubKey(pub(BigInteger.valueOf(n)), ScriptType.P2WPKH)
+    private fun trScript(n: Long) = Address.scriptPubKey(pub(BigInteger.valueOf(n)), ScriptType.P2TR)
+
+    /**
+     * Kilojoin v2 for real: a Taproot pool where A brings two coins and B one; C tries with a
+     * native SegWit coin and is refused; the round is signed (Schnorr, unified sighash), broadcast
+     * and mined on the BLAKE2b regtest. KILOJOIN_E2E_V2=<coins file>: "seed txid vout value tr|wpkh"
+     * lines, seeds 1 and 2 (A, tr), 3 (B, tr), 4 (C, wpkh).
+     */
+    @Test fun taprootSeveralCoins() {
+        val path = System.getenv("KILOJOIN_E2E_V2") ?: return
+        Protocol.NETWORK = "blake2b-regtest"
+        val rows = java.io.File(path).readLines().filter { it.isNotBlank() }.map { it.trim().split(" ") }
+        fun c(seed: Int): CoinjoinTx.Coin {
+            val (s0, txid, vout, value, kind) = rows.first { it[0] == seed.toString() }
+            return CoinjoinTx.Coin(txid, vout.toInt(), value.toLong(), pub(key(s0.toInt())),
+                if (kind == "tr") ScriptType.P2TR else ScriptType.P2WPKH)
+        }
+        val salt = System.nanoTime() % 1_000_000
+        val (terms, secret) = PoolSession.newPool(100_000, 2.0, 5, 1, script = ScriptType.P2TR, maxInputs = 3)
+        val a = PoolSession(Env("A"), PoolSession.newState(terms, true, secret, listOf(c(1), c(2)), listOf(key(1), key(2)),
+            listOf("a1", "a2"), trScript(90_000 + salt), trScript(91_000 + salt)))
+        a.start(); waitFor("A open") { a.state.phase == PoolSession.Phase.OPEN }
+
+        val found = java.util.concurrent.CompletableFuture<Protocol.Terms>()
+        val r = RelayClient(Protocol.RELAY, { _, ev -> Protocol.Terms.parse(ev)?.let { if (it.id == terms.id) found.complete(it) } })
+        r.connect(); r.subscribe("p", listOf(JSONObject().put("kinds", JSONArray().put(Protocol.KIND_POOL)).put("#d", JSONArray().put(terms.id))))
+        val seen = found.get(30, java.util.concurrent.TimeUnit.SECONDS); r.close()
+        assertEquals(ScriptType.P2TR, seen.script); assertEquals(3, seen.maxInputs)
+
+        // C claims its SegWit coin as if it were Taproot: its script does not match the chain.
+        val wrong = c(4).copy(type = ScriptType.P2TR)
+        val cc = PoolSession(Env("C"), PoolSession.newState(seen, false, null, listOf(wrong), listOf(key(4)), listOf("c"),
+            trScript(92_000 + salt), trScript(93_000 + salt)))
+        cc.start(); waitFor("C refused") { cc.state.phase == PoolSession.Phase.REJECTED }
+        println("C: ${cc.state.reason}"); cc.stop()
+
+        val b = PoolSession(Env("B"), PoolSession.newState(seen, false, null, listOf(c(3)), listOf(key(3)), listOf("b"),
+            trScript(94_000 + salt), trScript(95_000 + salt)))
+        b.start(); waitFor("B welcomed") { b.state.phase == PoolSession.Phase.OPEN && b.state.seats.size == 2 }
+        b.requestClose()
+        waitFor("A asked") { a.state.phase == PoolSession.Phase.VOTING }
+        a.vote(true)
+        waitFor("both signing", 180) { a.state.phase == PoolSession.Phase.SIGNING && b.state.phase == PoolSession.Phase.SIGNING }
+        assertEquals(3, a.plan()!!.coins.size)
+        a.sign(listOf(key(1), key(2))); b.sign(key(3))
+        waitFor("broadcast") { a.state.txid != null && b.state.txid != null }
+        rpc("generatetoaddress", 1, rpc("getnewaddress") as String)
+        waitFor("confirmed", 60) { a.state.phase == PoolSession.Phase.CONFIRMED && b.state.phase == PoolSession.Phase.CONFIRMED }
+        println("v2 taproot txid ${a.state.txid}")
+        a.stop(); b.stop()
+    }
 
     private fun waitFor(what: String, seconds: Int = 120, cond: () -> Boolean) {
         val end = System.currentTimeMillis() + seconds * 1000L

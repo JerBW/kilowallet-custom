@@ -4,6 +4,7 @@ import com.kilombino.pyblockwatch.crypto.Address
 import com.kilombino.pyblockwatch.crypto.Ecdsa
 import com.kilombino.pyblockwatch.crypto.Hashes
 import com.kilombino.pyblockwatch.crypto.Hashes.toHex
+import com.kilombino.pyblockwatch.crypto.Schnorr
 import com.kilombino.pyblockwatch.crypto.ScriptType
 import com.kilombino.pyblockwatch.crypto.Secp256k1
 import com.kilombino.pyblockwatch.crypto.TxBuilder
@@ -13,10 +14,12 @@ import kotlin.math.ceil
 /**
  * The transaction side of a coinjoin, kept free of networking so it can be tested alone.
  *
- * Shape: one P2WPKH input per participant; one mix output of exactly the pool amount per
- * participant, all identical; and a change output per participant who has any. Each person
- * pays their own share of the miner fee out of their change, so the mix outputs stay equal
- * and nobody pays for anyone else.
+ * Shape: one or more inputs per participant, all of the pool's one address type (native
+ * SegWit P2WPKH, or Taproot P2TR by key path, never both); one mix output of exactly the pool
+ * amount per participant, all identical; and a change output per participant who has any, of
+ * that same type. Each person pays their own share of the miner fee (their inputs, their
+ * outputs, part of the overhead) out of their change, so the mix outputs stay equal and nobody
+ * pays for anyone else.
  *
  * Ordering is canonical (inputs by outpoint, mix outputs by script, then the change outputs
  * by script), so every participant builds the very same transaction and the same txid, and
@@ -31,38 +34,47 @@ object CoinjoinTx {
     const val SEQUENCE = 0xfffffffdL
     /** Same threshold as the wallet's sends: below it, change goes to the fee instead. */
     const val DUST = 294L
-    // P2WPKH vbytes: input 68, output 31, transaction overhead 10.5 split among everyone.
-    private const val IN_VB = 68.0
-    private const val OUT_VB = 31.0
     private const val OVERHEAD_VB = 10.5
 
-    /** A participant's registered input, as everybody sees it. */
-    data class Coin(val txid: String, val vout: Int, val value: Long, val pubkey: ByteArray) {
+    /**
+     * Input vbytes: P2WPKH 68 (72-byte signature at most); Taproot key path 57.75 (a 64-byte
+     * Schnorr signature plus the unified sighash byte).
+     */
+    fun inputVb(type: ScriptType): Double = if (type == ScriptType.P2TR) 57.75 else 68.0
+    /** Output vbytes: P2WPKH 31, P2TR 43. */
+    fun outputVb(type: ScriptType): Double = if (type == ScriptType.P2TR) 43.0 else 31.0
+
+    /** A participant's registered input, as everybody sees it ([type] is the pool's). */
+    data class Coin(val txid: String, val vout: Int, val value: Long, val pubkey: ByteArray,
+                    val type: ScriptType = ScriptType.P2WPKH) {
         val outpoint: String get() = "$txid:$vout"
-        val script: ByteArray get() = Address.scriptPubKey(pubkey, ScriptType.P2WPKH)
+        /** For Taproot, [pubkey] is the BIP-86 internal key; the script holds its tweaked output key. */
+        val script: ByteArray get() = Address.scriptPubKey(pubkey, type)
     }
 
     /**
-     * What each participant pays the miners: their input, their mix output, their change and
+     * What each participant pays the miners: their [inputs], their mix output, their change and
      * half the transaction overhead (the share in a pool of two, the most anyone can owe).
      * Fixed per person and known at join time, so the change can be signed there and then.
      */
-    fun feeShare(feeRate: Double, withChange: Boolean = true): Long =
-        ceil(feeRate * (IN_VB + OUT_VB + (if (withChange) OUT_VB else 0.0) + OVERHEAD_VB / 2)).toLong()
+    fun feeShare(feeRate: Double, withChange: Boolean = true, inputs: Int = 1, type: ScriptType = ScriptType.P2WPKH): Long =
+        ceil(feeRate * (inputVb(type) * inputs + outputVb(type) + (if (withChange) outputVb(type) else 0.0) + OVERHEAD_VB / 2)).toLong()
 
     /**
-     * The change for [inputValue] in a pool of [amount] at [feeRate], or 0 when it would be
-     * dust (the dust then goes to the fee). Null if the coin is too small for the pool.
+     * The change for [inputValue] (all of a person's coins together) in a pool of [amount] at
+     * [feeRate], or 0 when it would be dust (the dust then goes to the fee). Null if the coins
+     * are too small for the pool.
      */
-    fun change(inputValue: Long, amount: Long, feeRate: Double): Long? {
-        val withChange = inputValue - amount - feeShare(feeRate, true)
+    fun change(inputValue: Long, amount: Long, feeRate: Double, inputs: Int = 1, type: ScriptType = ScriptType.P2WPKH): Long? {
+        val withChange = inputValue - amount - feeShare(feeRate, true, inputs, type)
         if (withChange > DUST) return withChange
-        val without = inputValue - amount - feeShare(feeRate, false)
+        val without = inputValue - amount - feeShare(feeRate, false, inputs, type)
         return if (without >= 0) 0L else null
     }
 
-    /** The smallest coin that can join a pool: the amount plus the fee share without change. */
-    fun minimumCoin(amount: Long, feeRate: Double): Long = amount + feeShare(feeRate, false)
+    /** The smallest single coin that can join a pool: the amount plus the fee share without change. */
+    fun minimumCoin(amount: Long, feeRate: Double, type: ScriptType = ScriptType.P2WPKH): Long =
+        amount + feeShare(feeRate, false, 1, type)
 
     data class Plan(
         val coins: List<Coin>,
@@ -70,7 +82,7 @@ object CoinjoinTx {
     ) {
         val inputs: List<TxBuilder.Input> get() = coins.map {
             // The private key is never read when only assembling or checking; it is a placeholder.
-            TxBuilder.Input(it.txid, it.vout, it.value, BigInteger.ONE, it.pubkey, SEQUENCE, ScriptType.P2WPKH)
+            TxBuilder.Input(it.txid, it.vout, it.value, BigInteger.ONE, it.pubkey, SEQUENCE, it.type)
         }
         val fee: Long get() = coins.sumOf { it.value } - outputs.sumOf { it.value }
     }
@@ -82,9 +94,14 @@ object CoinjoinTx {
      * [changes] its change. Throws if the pieces do not add up to a sane coinjoin.
      */
     fun plan(coins: List<Coin>, mixScripts: List<ByteArray>, changes: List<TxBuilder.Output>, amount: Long): Plan {
-        require(coins.size >= 2) { "a coinjoin needs at least two people" }
-        require(mixScripts.size == coins.size) { "one mix output per input" }
+        require(mixScripts.size >= 2) { "a coinjoin needs at least two people" }
+        require(coins.size >= mixScripts.size) { "every person brings at least one coin" }
         require(coins.map { it.outpoint }.toSet().size == coins.size) { "the same coin was registered twice" }
+        // One address type for everything: a P2WPKH coin or output in a Taproot round (or the
+        // other way round) would point at its owner.
+        val type = coins.first().type
+        require(coins.all { it.type == type }) { "coins of two address types" }
+        require((mixScripts + changes.map { it.scriptPubKey }).all { isType(it, type) }) { "an output of another address type" }
         val allScripts = (mixScripts + changes.map { it.scriptPubKey }).map { it.toHex() }
         require(allScripts.toSet().size == allScripts.size) { "an address appears twice" }
         val inputScripts = coins.map { it.script.toHex() }.toSet()
@@ -97,7 +114,13 @@ object CoinjoinTx {
         return p
     }
 
-    /** Our signature for our input [mine] in [plan]: unified sighash, SIGHASH_ALL. */
+    /** True when [script] is an output of [type]: `0014<20>` for P2WPKH, `5120<32>` for P2TR. */
+    fun isType(script: ByteArray, type: ScriptType): Boolean = when (type) {
+        ScriptType.P2TR -> script.size == 34 && script[0] == 0x51.toByte() && script[1] == 0x20.toByte()
+        else -> script.size == 22 && script[0] == 0.toByte() && script[1] == 0x14.toByte()
+    }
+
+    /** Our signature for our input [mine] in [plan]: unified sighash, SIGHASH_ALL (ECDSA, or Schnorr for Taproot). */
     fun sign(plan: Plan, mine: Coin, privateKey: BigInteger): ByteArray {
         val inputs = plan.inputs.toMutableList()
         val i = plan.coins.indexOfFirst { it.outpoint == mine.outpoint }
@@ -112,7 +135,10 @@ object CoinjoinTx {
         if (i < 0 || sig.isEmpty()) return false
         if ((sig.last().toInt() and 0xFF) != (TxBuilder.SIGHASH_UNIFIED or TxBuilder.SIGHASH_ALL)) return false
         val h = TxBuilder.unifiedSighash(VERSION, plan.inputs, plan.outputs, i, 0)
-        Ecdsa.verify(Secp256k1.decompress(coin.pubkey), h, parseDer(sig.copyOfRange(0, sig.size - 1)))
+        if (coin.type == ScriptType.P2TR) {
+            // Key path: 64-byte Schnorr + the hash byte, against the tweaked output key.
+            sig.size == 65 && Schnorr.verify(coin.script.copyOfRange(2, 34), h, sig.copyOfRange(0, 64))
+        } else Ecdsa.verify(Secp256k1.decompress(coin.pubkey), h, parseDer(sig.copyOfRange(0, sig.size - 1)))
     }.getOrDefault(false)
 
     /** The txid [plan] will have: it does not cover the witnesses, so it is known before signing. */
@@ -129,16 +155,20 @@ object CoinjoinTx {
      * What we check before signing: our mix output is there with the full amount, our change
      * is exactly what we expect, and the fee is in a sane range for the pool's rate.
      */
-    fun checkOurs(plan: Plan, mixScript: ByteArray, change: TxBuilder.Output?, amount: Long, feeRate: Double): String? {
+    fun checkOurs(plan: Plan, mixScript: ByteArray, change: TxBuilder.Output?, amount: Long, feeRate: Double,
+                  seatInputs: List<Int> = plan.coins.map { 1 }): String? {
+        val type = plan.coins.first().type
+        val people = seatInputs.size
         val mix = plan.outputs.count { it.scriptPubKey.contentEquals(mixScript) && it.value == amount }
         if (mix != 1) return "our mixed output is missing"
-        if (plan.outputs.count { it.value == amount } < plan.coins.size) return "the mixed outputs are not all equal"
+        if (plan.outputs.count { it.value == amount } < people) return "the mixed outputs are not all equal"
+        if (seatInputs.sum() != plan.coins.size) return "the coins do not match the seats"
         if (change != null && plan.outputs.none { it.scriptPubKey.contentEquals(change.scriptPubKey) && it.value == change.value })
             return "our change is missing or wrong"
-        val vb = OVERHEAD_VB + IN_VB * plan.coins.size + OUT_VB * plan.outputs.size
+        val vb = OVERHEAD_VB + inputVb(type) * plan.coins.size + outputVb(type) * plan.outputs.size
         if (plan.fee < kotlin.math.floor(feeRate * vb * 0.95)) return "the fee is too low"
         // Each person's fixed share, plus any dust folded into the fee; past that is a mistake.
-        if (plan.fee > feeShare(feeRate, true) * plan.coins.size + (DUST + 1) * plan.coins.size) return "the fee is too high"
+        if (plan.fee > seatInputs.sumOf { feeShare(feeRate, true, it, type) } + (DUST + 1) * people) return "the fee is too high"
         return null
     }
 
