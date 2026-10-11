@@ -520,8 +520,20 @@ fun SendSheet(vm: WalletViewModel, accent: Color, onClose: () -> Unit) {
                 if (!askedSave && own == false) SaveContactPrompt(to.trim(), accent) { askedSave = true }
                 Text("Broadcast ✓", color = Good, style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.height(6.dp))
-                SelectionContainer { Text(phase.txid, color = TextSoft,
-                    style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace) }
+                // Tap the txid (or DETAILS) for the transaction window: copy it, or open it on the explorer.
+                var details by remember(phase.txid) { mutableStateOf(false) }
+                val sentChain = vm.state.collectAsState().value.selected
+                if (details) TxDetailDialog(phase.txid, accent, vm.explorerFor(sentChain),
+                    status = "just sent · in the mempool", onSpeedUp = null, onClose = { details = false }, vm = vm, chain = sentChain)
+                Text(phase.txid, color = TextSoft, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace,
+                    modifier = Modifier.clickable { details = true })
+                val clip = androidx.compose.ui.platform.LocalClipboardManager.current
+                var copied by remember(phase.txid) { mutableStateOf(false) }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick = { clip.setText(androidx.compose.ui.text.AnnotatedString(phase.txid)); copied = true }) {
+                        Text(if (copied) "COPIED ✓" else "📋 COPY TXID", color = accent) }
+                    TextButton(onClick = { details = true }) { Text("🔎 DETAILS", color = accent) }
+                }
                 Spacer(Modifier.height(8.dp))
                 Button(onClick = { vm.resetSend(); onClose() },
                     colors = ButtonDefaults.buttonColors(containerColor = accent, contentColor = Ink),
