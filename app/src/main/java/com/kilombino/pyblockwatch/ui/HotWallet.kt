@@ -164,12 +164,36 @@ fun DiceScreen(vm: WalletViewModel, onBack: () -> Unit) {
 
             error?.let { Text(it, color = Bad, style = MaterialTheme.typography.bodySmall) }
 
+            // Rolls that look made up (Coldcard does the same) get a warning before they become a seed.
+            var suspicious by remember { mutableStateOf<List<String>?>(null) }
+            val generate = {
+                error = null
+                runCatching { Bip39.fromEntropy(Bip39.entropyFromDiceRolls(rolls, strength)) }
+                    .onSuccess { mnemonic = it }
+                    .onFailure { error = it.message }
+            }
+            suspicious?.let { why ->
+                AlertDialog(
+                    onDismissRequest = { suspicious = null },
+                    title = { Text("These don't look like real dice") },
+                    text = {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            why.forEach { Text("• $it", style = MaterialTheme.typography.bodySmall) }
+                            Text("Numbers made up by hand are far easier to guess than real rolls, and anyone who " +
+                                "guesses your seed takes your coins. Roll a real die for every number.",
+                                style = MaterialTheme.typography.bodySmall, color = Warn)
+                        }
+                    },
+                    confirmButton = { TextButton(onClick = { suspicious = null; rolls = "" }) { Text("ROLL AGAIN", color = Good) } },
+                    dismissButton = { TextButton(onClick = { suspicious = null; generate() }) {
+                        Text("I ROLLED REAL DICE", color = TextFaint) } },
+                    containerColor = PanelBg, titleContentColor = TextMain, textContentColor = TextSoft,
+                )
+            }
             Button(
                 onClick = {
-                    error = null
-                    runCatching { Bip39.fromEntropy(Bip39.entropyFromDiceRolls(rolls, strength)) }
-                        .onSuccess { mnemonic = it }
-                        .onFailure { error = it.message }
+                    val why = com.kilombino.pyblockwatch.crypto.DiceCheck.problems(rolls)
+                    if (why.isNotEmpty()) suspicious = why else generate()
                 },
                 enabled = rolls.length == needed,
                 colors = ButtonDefaults.buttonColors(containerColor = Purple, contentColor = Ink),
