@@ -31,6 +31,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.material3.AlertDialog
 import androidx.compose.runtime.produceState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -126,6 +128,9 @@ fun DiceScreen(vm: WalletViewModel, onBack: () -> Unit) {
             Panel(accent = Orange) {
                 Text("${rolls.length} / $needed rolls",
                      style = MaterialTheme.typography.titleMedium, color = Orange)
+                // The last rolls, so every tap visibly lands (and a wrong one is easy to spot and undo).
+                Text(if (rolls.isEmpty()) "tap the number on the die" else "… " + rolls.takeLast(12).toList().joinToString(" "),
+                     style = MaterialTheme.typography.bodyMedium, color = TextSoft, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
                 Spacer(Modifier.height(10.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
                     for (n in 1..6) {
@@ -134,15 +139,27 @@ fun DiceScreen(vm: WalletViewModel, onBack: () -> Unit) {
                         }
                     }
                 }
-                Spacer(Modifier.height(8.dp))
-                Row {
+                // Well below the dice, so a slip off a die never undoes or clears anything;
+                // clearing asks first.
+                Spacer(Modifier.height(36.dp))
+                var askClear by remember { mutableStateOf(false) }
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     TextButton(onClick = { if (rolls.isNotEmpty()) rolls = rolls.dropLast(1) }) {
-                        Text("⌫ undo", color = TextSoft, style = MaterialTheme.typography.bodySmall)
+                        Text("⌫ undo last", color = TextSoft, style = MaterialTheme.typography.bodySmall)
                     }
-                    TextButton(onClick = { rolls = "" }) {
-                        Text("clear", color = TextFaint, style = MaterialTheme.typography.bodySmall)
+                    Spacer(Modifier.weight(1f))
+                    TextButton(onClick = { if (rolls.isNotEmpty()) askClear = true }) {
+                        Text("clear all", color = TextFaint, style = MaterialTheme.typography.bodySmall)
                     }
                 }
+                if (askClear) AlertDialog(
+                    onDismissRequest = { askClear = false },
+                    title = { Text("Clear all ${rolls.length} rolls?") },
+                    text = { Text("You would start again from the first roll.") },
+                    confirmButton = { TextButton(onClick = { rolls = ""; askClear = false }) { Text("CLEAR", color = Bad) } },
+                    dismissButton = { TextButton(onClick = { askClear = false }) { Text("KEEP THEM", color = TextSoft) } },
+                    containerColor = PanelBg, titleContentColor = TextMain, textContentColor = TextSoft,
+                )
             }
 
             error?.let { Text(it, color = Bad, style = MaterialTheme.typography.bodySmall) }
@@ -209,13 +226,20 @@ private fun WordCountChip(label: String, selected: Boolean, modifier: Modifier =
 
 @Composable
 private fun DieButton(n: Int, enabled: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    // Like a keyboard key: it lights up and gives a tick under the finger, so each tap is felt.
+    val source = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+    val pressed by source.collectIsPressedAsState()
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
     Column(
         modifier.clip(RoundedCornerShape(10.dp))
-            .background(if (enabled) Orange.copy(alpha = 0.16f) else PanelSoft)
-            .clickable(enabled = enabled, onClick = onClick).padding(vertical = 14.dp),
+            .background(when { !enabled -> PanelSoft; pressed -> Orange.copy(alpha = 0.55f); else -> Orange.copy(alpha = 0.16f) })
+            .clickable(interactionSource = source, indication = androidx.compose.material3.ripple(color = Orange), enabled = enabled) {
+                haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
+                onClick()
+            }.padding(vertical = 14.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text("$n", color = if (enabled) Orange else TextFaint,
+        Text("$n", color = if (!enabled) TextFaint else if (pressed) Ink else Orange,
              style = MaterialTheme.typography.titleLarge)
     }
 }
