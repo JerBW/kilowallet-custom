@@ -1809,8 +1809,14 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
     /** Confirmed coins of either kind that never came out of a coinjoin: what an exact coin can be paid with. */
     suspend fun exactCoinSources(): List<Scanner.SpendableUtxo> {
         val mixed = com.kilombino.pyblockwatch.coinjoin.CoinjoinHub.states.value.map { it.mixScript.toList() }.toSet()
-        return (coinjoinCoins(null) + (if (taprootPools()) coinjoinCoins(ScriptType.P2TR) else emptyList()))
-            .filter { coinScript(it).toList() !in mixed }.sortedByDescending { it.value }
+        val cs = _state.value.chains[Chain.BLAKE2B] ?: return emptyList()
+        val endpoint = store.endpoint(Chain.BLAKE2B)
+        // One look at the server for every address, bc1q and bc1p alike.
+        val u = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            scanner.gatherUtxos(cs.rows.filter { it.isUsed }, endpoint, store.pinnedFingerprint(endpoint))
+        }
+        return notInCoinjoin(Chain.BLAKE2B, u).filter { it.height > 0 && coinScript(it).toList() !in mixed }
+            .sortedByDescending { it.value }
     }
 
     /** "Taproot" or "SegWit": which kind of coin [u] is. */

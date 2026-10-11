@@ -375,6 +375,10 @@ private fun CoinPicker(
                 else -> "${chosen.size} coin(s) · ${groupSats(total)} sats → ${groupSats(amount)} mixed + ${groupSats(change)} change · fee ${groupSats(fee)}"
             }, color = if (change == null) Warn else accent, style = MaterialTheme.typography.bodySmall)
         }
+        if (list != null) Text(if (type == ScriptType.P2TR)
+            "Only Taproot (bc1p) coins can join this pool. Your native SegWit coins can still pay for a Taproot exact coin below."
+        else "Only native SegWit (bc1q) coins can join this pool. Your Taproot coins can still pay for a native SegWit exact coin below.",
+            color = TextFaint, style = MaterialTheme.typography.bodySmall)
         if (list != null && list.none { it.value == exact }) TextButton(onClick = { vm.resetSend(); making = true }) {
             Text("＋ PREPARE AN EXACT COIN OF ${groupSats(exact)} SATS", color = accent, style = MaterialTheme.typography.bodySmall)
         }
@@ -648,7 +652,12 @@ private fun ExactCoinPanel(vm: WalletViewModel, accent: Color, exact: Long, tag:
     val state by vm.state.collectAsState()
     var sources by remember { mutableStateOf<List<Scanner.SpendableUtxo>?>(null) }
     val picked = remember { mutableStateListOf<Scanner.SpendableUtxo>() }
-    LaunchedEffect(Unit) { sources = runCatching { vm.exactCoinSources() }.getOrDefault(emptyList()) }
+    var sourcesError by remember { mutableStateOf<String?>(null) }
+    var sourcesTry by remember { mutableStateOf(0) }
+    LaunchedEffect(sourcesTry) {
+        sources = null; sourcesError = null
+        runCatching { vm.exactCoinSources() }.onSuccess { sources = it }.onFailure { sourcesError = it.message ?: "could not read your coins" }
+    }
     var suggested by remember { mutableStateOf<Double?>(null) }
     var asked by remember { mutableStateOf(false) }
     var rateText by remember { mutableStateOf("") }
@@ -666,7 +675,14 @@ private fun ExactCoinPanel(vm: WalletViewModel, accent: Color, exact: Long, tag:
                 (if (tag == ScriptType.P2TR) "Taproot (bc1p)" else "native SegWit (bc1q)") + " address of this wallet. It needs one " +
                 "confirmation before it can join; then it goes in with no change.")
             Spacer(Modifier.height(6.dp))
-            Text("Pay it with (none ticked: the biggest coins first)", color = TextMain, style = MaterialTheme.typography.bodySmall)
+            SectionLabel("Coin control · pay it with", accent)
+            Text("Tick one or more coins, native SegWit and Taproot alike; with none ticked the biggest go first. " +
+                "The exact coin itself is always ${if (tag == ScriptType.P2TR) "Taproot" else "native SegWit"}, the pool's type.",
+                color = TextFaint, style = MaterialTheme.typography.bodySmall)
+            sourcesError?.let { e ->
+                Text("Could not read your coins: $e", color = Warn, style = MaterialTheme.typography.bodySmall)
+                TextButton(onClick = { sourcesTry++ }) { Text("TRY AGAIN", color = accent) }
+            }
             sources?.let { list ->
                 if (list.isEmpty()) Text("No confirmed coin to pay it with.", color = Warn, style = MaterialTheme.typography.bodySmall)
                 list.forEach { u ->
@@ -682,9 +698,10 @@ private fun ExactCoinPanel(vm: WalletViewModel, accent: Color, exact: Long, tag:
                         }
                     }
                 }
-                if (picked.isNotEmpty()) Text("ticked: ${groupSats(picked.sumOf { it.value })} sats", color = accent,
-                    style = MaterialTheme.typography.bodySmall)
-            } ?: Text("reading your coins…", color = TextSoft, style = MaterialTheme.typography.bodySmall)
+                if (picked.isNotEmpty()) Text("ticked: ${picked.size} coin(s), ${groupSats(picked.sumOf { it.value })} sats" +
+                    if (picked.sumOf { it.value } < exact) " — not enough for ${groupSats(exact)} plus the fee" else "",
+                    color = if (picked.sumOf { it.value } < exact) Warn else accent, style = MaterialTheme.typography.bodySmall)
+            } ?: if (sourcesError == null) Text("reading your coins…", color = TextSoft, style = MaterialTheme.typography.bodySmall) else Unit
             Spacer(Modifier.height(6.dp))
             Text("What this payment pays to get mined:", color = TextMain, style = MaterialTheme.typography.bodySmall)
             Text(when {
@@ -701,9 +718,12 @@ private fun ExactCoinPanel(vm: WalletViewModel, accent: Color, exact: Long, tag:
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = onDone, colors = ButtonDefaults.buttonColors(containerColor = PanelSoft, contentColor = TextSoft),
                     shape = RoundedCornerShape(12.dp), modifier = Modifier.weight(1f)) { Text("CANCEL") }
-                Button(onClick = { rate?.let { vm.prepareExactCoin(exact, it, tag, picked.toList()); started = true } }, enabled = rate != null,
+                Button(onClick = { rate?.let { vm.prepareExactCoin(exact, it, tag, picked.toList()); started = true } },
+                    enabled = rate != null && sources != null && (picked.isEmpty() || picked.sumOf { it.value } >= exact),
                     colors = ButtonDefaults.buttonColors(containerColor = accent, contentColor = Ink),
-                    shape = RoundedCornerShape(12.dp), modifier = Modifier.weight(1f)) { Text("PREPARE") }
+                    shape = RoundedCornerShape(12.dp), modifier = Modifier.weight(1f)) {
+                    Text(if (picked.isEmpty()) "PREPARE" else "PREPARE WITH ${picked.size}")
+                }
             }
             return@Panel
         }
@@ -725,6 +745,10 @@ private fun ExactCoinPanel(vm: WalletViewModel, accent: Color, exact: Long, tag:
                     }
                 }, enabled = concern == null || feeOk, colors = ButtonDefaults.buttonColors(containerColor = accent, contentColor = Ink),
                     shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) { Text("CONFIRM & SIGN") }
+                // Back to the coin control and the fee, keeping what was ticked.
+                TextButton(onClick = { vm.resetSend(); started = false }, modifier = Modifier.fillMaxWidth()) {
+                    Text("edit coins or fee", color = TextSoft)
+                }
             }
             is SendPhase.Sent -> {
                 Text("Sent ✓ — it will appear above after one confirmation.", color = Good, style = MaterialTheme.typography.bodySmall)
