@@ -512,7 +512,6 @@ private fun WalletScreen(state: UiState, vm: WalletViewModel, onToggleNotificati
     // Pull down to refresh the selected chain, as in simple mode.
     var refreshing by remember { mutableStateOf(false) }
     val pullScope = rememberCoroutineScope()
-    // Pulling down and the ↻ button next to the logo do the same.
     val doRefresh: () -> Unit = {
         pullScope.launch {
             refreshing = true
@@ -554,8 +553,7 @@ private fun WalletScreen(state: UiState, vm: WalletViewModel, onToggleNotificati
                 Text(if (showSettings) "close" else "settings",
                      style = MaterialTheme.typography.bodySmall, color = TextSoft)
             }
-            RefreshControls(refreshing, state.refreshBackgroundMinutes > 0, state.notificationsEnabled, accent,
-                onRefresh = doRefresh, onPower = { vm.toggleBackground() })
+            QuitButton(accent)
             Spacer(Modifier.width(4.dp))
             AppLogo(34)
         }
@@ -935,7 +933,7 @@ internal fun SettingsPanel(
         // persistent notification, no battery while closed).
         Spacer(Modifier.height(10.dp))
         Text("Refresh", style = MaterialTheme.typography.bodyMedium, color = TextMain)
-        Explain("While the app is open")
+        Explain("While the app is open (by hand: pull the screen down)")
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             listOf(30 to "30 s", 60 to "1 min", 300 to "5 min", 0 to "by hand").forEach { (v, l) ->
                 FiatChip(l, state.refreshOpenSeconds == v, accent) { vm.setRefreshOpen(v) }

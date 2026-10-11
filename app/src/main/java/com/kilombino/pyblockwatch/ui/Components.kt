@@ -231,48 +231,48 @@ private fun PowerGlyph(color: Color) {
     }
 }
 
-/** The balance card's countdown: "↻ 4:59", or "↻ by hand" when automatic refresh is off. */
+/** The balance card's countdown: "↻ 4:59", or a hint to pull down when automatic refresh is off. */
 fun refreshCountdown(nextRefreshAt: Long, seconds: Int): String =
-    if (nextRefreshAt <= 0L) "↻ by hand"
+    if (nextRefreshAt <= 0L) "↓ pull to refresh"
     else if (seconds >= 60) "↻ %d:%02d".format(seconds / 60, seconds % 60) else "↻ ${seconds}s"
 
 /**
- * Next to the logo: ↻ looks now (it spins while it does), and ⏻ shows whether the wallet checks
- * in the background. Turning that off asks first, since incoming payments then go unannounced
- * until the app is opened; turning it on again is one tap.
+ * Next to the logo: the power button quits the app for real. The balance watcher and any
+ * coinjoin round stop, the Ark engine goes with the process, and nothing runs until the app
+ * is opened again (then the background checks come back as set in settings).
  */
 @Composable
-fun RefreshControls(spinning: Boolean, backgroundOn: Boolean, showPower: Boolean, accent: Color,
-                    onRefresh: () -> Unit, onPower: () -> Unit) {
-    var askOff by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
-    val spin = rememberInfiniteTransition(label = "refresh")
-    val angle by spin.animateFloat(0f, 360f, infiniteRepeatable(tween(900, easing = LinearEasing)), label = "angle")
-    // Stacked, so the header row keeps its width on a narrow phone.
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(Modifier.size(26.dp).clip(androidx.compose.foundation.shape.CircleShape).clickable(enabled = !spinning) { onRefresh() },
-            contentAlignment = Alignment.Center) {
-            Text("↻", style = MaterialTheme.typography.titleMedium, color = if (spinning) accent else TextSoft,
-                 modifier = if (spinning) Modifier.graphicsLayer { rotationZ = angle } else Modifier)
-        }
-        if (showPower) Box(Modifier.size(26.dp).clip(androidx.compose.foundation.shape.CircleShape)
-                .clickable { if (backgroundOn) askOff = true else onPower() },
-            contentAlignment = Alignment.Center) {
-            PowerGlyph(if (backgroundOn) Good else TextFaint)
-        }
+fun QuitButton(accent: Color) {
+    val activity = androidx.compose.ui.platform.LocalContext.current as? android.app.Activity ?: return
+    var ask by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    Box(Modifier.size(30.dp).clip(androidx.compose.foundation.shape.CircleShape).clickable { ask = true },
+        contentAlignment = Alignment.Center) { PowerGlyph(TextSoft) }
+    if (ask) {
+        val rounds = com.kilombino.pyblockwatch.coinjoin.CoinjoinHub.hasActive(activity)
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { ask = false },
+            title = { Text("Close Kilowallet?") },
+            text = {
+                Text((if (rounds) "A coinjoin round is still running: it waits on this phone until you open the app " +
+                    "again, and if it ends without you your coins stay where they are. " else "") +
+                    "Everything stops until you open the app again: no balance checks, no alerts for incoming " +
+                    "payments, no persistent notification and no battery used. If you use Ark, open the app at " +
+                    "least once a month so your Ark coins are renewed.", style = MaterialTheme.typography.bodySmall)
+            },
+            confirmButton = { androidx.compose.material3.TextButton(onClick = { ask = false; quitApp(activity) }) { Text("CLOSE", color = accent) } },
+            dismissButton = { androidx.compose.material3.TextButton(onClick = { ask = false }) { Text("CANCEL", color = TextSoft) } },
+            containerColor = PanelBg, titleContentColor = TextMain, textContentColor = TextSoft,
+        )
     }
-    if (askOff) androidx.compose.material3.AlertDialog(
-        onDismissRequest = { askOff = false },
-        title = { Text("Stop background checks?") },
-        text = {
-            Text("With the app closed it will no longer look at your balances: no alerts for incoming " +
-                "payments, no persistent notification and no battery used until you open it again. " +
-                "If you use Ark, open the app at least once a month so your Ark coins are renewed. " +
-                "Tap the power button again to turn it back on.", style = MaterialTheme.typography.bodySmall)
-        },
-        confirmButton = { androidx.compose.material3.TextButton(onClick = { askOff = false; onPower() }) { Text("STOP", color = accent) } },
-        dismissButton = { androidx.compose.material3.TextButton(onClick = { askOff = false }) { Text("CANCEL", color = TextSoft) } },
-        containerColor = PanelBg, titleContentColor = TextMain, textContentColor = TextSoft,
-    )
+}
+
+/** Stop every service, leave the task list, and end the process. */
+fun quitApp(activity: android.app.Activity) {
+    runCatching { com.kilombino.pyblockwatch.coinjoin.CoinjoinHub.stopAll() }
+    activity.stopService(android.content.Intent(activity, com.kilombino.pyblockwatch.coinjoin.CoinjoinService::class.java))
+    activity.stopService(android.content.Intent(activity, com.kilombino.pyblockwatch.data.WatchService::class.java))
+    activity.finishAndRemoveTask()
+    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ android.os.Process.killProcess(android.os.Process.myPid()) }, 400)
 }
 
 /** Fiat per whole coin: BTC from the market feed, Spamcoin through its XBT/Poolsats rate. */

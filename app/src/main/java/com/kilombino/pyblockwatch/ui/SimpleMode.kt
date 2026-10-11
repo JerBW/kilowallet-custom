@@ -160,7 +160,6 @@ fun SimpleScreen(state: UiState, vm: WalletViewModel, onToggleNotifications: (Bo
     // Pull down to refresh the balance and the price.
     var refreshing by remember { mutableStateOf(false) }
     val pullScope = rememberCoroutineScope()
-    // Pulling down and the ↻ button next to the logo do the same.
     val doRefresh: () -> Unit = {
         pullScope.launch {
             refreshing = true
@@ -196,8 +195,7 @@ fun SimpleScreen(state: UiState, vm: WalletViewModel, onToggleNotifications: (Bo
             TextButton(onClick = { vm.setUiMode("advanced") }, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp)) {
                 Text("advanced", style = MaterialTheme.typography.bodySmall, color = TextSoft)
             }
-            RefreshControls(refreshing, state.refreshBackgroundMinutes > 0, state.notificationsEnabled, accent,
-                onRefresh = doRefresh, onPower = { vm.toggleBackground() })
+            QuitButton(accent)
             Spacer(Modifier.width(4.dp))
             AppLogo(34)
         }

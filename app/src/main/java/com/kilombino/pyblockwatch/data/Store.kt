@@ -216,14 +216,7 @@ class Store(context: Context, private val profile: String = HOT) {
      */
     var refreshBackgroundMinutes: Int
         get() = prefs.getInt("refresh_bg_min", 15)
-        set(v) {
-            val e = prefs.edit().putInt("refresh_bg_min", v)
-            if (v > 0) e.putInt("refresh_bg_last", v)
-            e.apply()
-        }
-
-    /** The background interval to go back to when the ⏻ switch turns it on again. */
-    val refreshBackgroundLast: Int get() = prefs.getInt("refresh_bg_last", 15)
+        set(v) = prefs.edit().putInt("refresh_bg_min", v).apply()
 
     /**
      * Which address type to derive from the xpub. Defaults to native SegWit (BIP-84,

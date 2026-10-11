@@ -602,10 +602,6 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(refreshBackgroundMinutes = minutes) }
     }
 
-    /** The ⏻ switch: background checks off, or back on at the interval they had. */
-    fun toggleBackground() = setRefreshBackground(
-        if (_state.value.refreshBackgroundMinutes > 0) 0 else store.refreshBackgroundLast)
-
     /** Accept a changed certificate — only ever from an explicit user action. */
     fun trustCurrentCertificate(chain: Chain) {
         val st = _state.value.chains[chain] ?: return
