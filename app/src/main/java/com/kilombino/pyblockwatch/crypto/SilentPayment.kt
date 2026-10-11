@@ -21,6 +21,17 @@ object SilentPayment {
     /** One coin being spent: its private key and the outpoint it comes from. */
     data class Input(val privateKey: BigInteger, val txid: String, val vout: Int)
 
+    /**
+     * The key BIP-352 sums for one input: the key itself for P2WPKH, and for a Taproot key-path
+     * coin the tweaked output key, negated when its point has an odd Y (so it matches the x-only key).
+     */
+    fun inputKey(privateKey: BigInteger, taproot: Boolean): BigInteger {
+        if (!taproot) return privateKey
+        val t = Schnorr.tweakedSecret(privateKey)
+        val y = Secp256k1.publicPoint(t).y!!
+        return if (y.testBit(0)) N.subtract(t) else t
+    }
+
     /** Decode an `sp1…` address into its scan and spend keys. */
     fun decodeAddress(address: String): Recipient {
         val payload = Bech32.decodeSilentPayment(address.trim())

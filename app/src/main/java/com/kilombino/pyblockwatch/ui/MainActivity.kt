@@ -568,7 +568,7 @@ private fun WalletScreen(state: UiState, vm: WalletViewModel, onToggleNotificati
             return@Column
         }
 
-        BalanceCard(chain, cs, accent, state.scriptType, state.nextRefreshAt, state.market, state.fiat, vm::setFiat)
+        BalanceCard(chain, cs, accent, if (state.isHot && state.receiveTaproot && state.taprootXpub != null) ScriptType.P2TR else state.scriptType, state.nextRefreshAt, state.market, state.fiat, vm::setFiat)
 
         when {
             showSend -> SendSheet(vm, accent) { showSend = false }
@@ -960,16 +960,28 @@ internal fun SettingsPanel(
         }
 
         Spacer(Modifier.height(14.dp))
-        Text("Address type (derivation)",
+        Text(if (state.isHot) "Address type for new addresses" else "Address type (derivation)",
              style = MaterialTheme.typography.bodyMedium, color = TextMain)
-        Explain("How the keys are read from your xpub. BIP84 (bc1q) by default. " +
-            "Change it if your wallet uses another format; both chains are rescanned.")
-        Spacer(Modifier.height(4.dp))
-        // The hot wallet's xpub is its BIP84 account: reading it as another type would give
-        // addresses its keys do not sign for. Only a watch-only xpub may change type.
-        if (state.isHot) Text("Hot wallet: BIP84 (bc1q), fixed — the keys it signs with.",
-            style = MaterialTheme.typography.bodySmall, color = TextFaint)
-        else DerivationSelector(state.scriptType, accent) { vm.setScriptType(it) }
+        if (state.isHot) {
+            // The hot wallet has both accounts: this only picks which one new addresses come from.
+            Explain("Native SegWit (bc1q) by default. With Taproot (bc1p), new receive and change addresses are " +
+                "Taproot: its coins are cheaper to spend, so a send with several of them pays less. " +
+                "Both kinds are always scanned and spent, so switching never hides a coin. " +
+                "Coinjoin pools use only your bc1q coins.")
+            Spacer(Modifier.height(4.dp))
+            val activity = LocalContext.current as FragmentActivity
+            HotTypeSelector(state.receiveTaproot, accent) { taproot ->
+                if (taproot && vm.taprootNeedsUnlock()) vm.seedCipherOrToast()?.let { cipher ->
+                    Biometric.authenticate(activity, "Add Taproot addresses", "Unlock to work out your Taproot account", cipher,
+                        onSuccess = { authed -> vm.setReceiveTaproot(true, authed) { vm.toast(it) } }, onError = { vm.toast(it) })
+                } else vm.setReceiveTaproot(taproot) { vm.toast(it) }
+            }
+        } else {
+            Explain("How the keys are read from your xpub. BIP84 (bc1q) by default. " +
+                "Change it if your wallet uses another format; both chains are rescanned.")
+            Spacer(Modifier.height(4.dp))
+            DerivationSelector(state.scriptType, accent) { vm.setScriptType(it) }
+        }
 
         Spacer(Modifier.height(14.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1169,6 +1181,20 @@ internal fun SettingsPanel(
             dismissButton = { TextButton(onClick = { askForget = false }) { Text("KEEP IT", color = TextSoft) } },
             containerColor = PanelBg, titleContentColor = TextMain, textContentColor = TextSoft,
         )
+    }
+}
+
+/** Hot wallet: native SegWit (BIP-84) or Taproot (BIP-86) for the addresses it hands out next. */
+@Composable
+private fun HotTypeSelector(taproot: Boolean, accent: Color, onSelect: (Boolean) -> Unit) {
+    Column {
+        listOf(false to "BIP84 · Native SegWit (bc1q)  (m/84'/0'/0')", true to "BIP86 · Taproot (bc1p)  (m/86'/0'/0')").forEach { (t, label) ->
+            val sel = t == taproot
+            TextButton(onClick = { if (!sel) onSelect(t) }, modifier = Modifier.fillMaxWidth()) {
+                Text((if (sel) "● " else "○ ") + label, color = if (sel) accent else TextMain,
+                    style = MaterialTheme.typography.bodySmall, modifier = Modifier.fillMaxWidth())
+            }
+        }
     }
 }
 

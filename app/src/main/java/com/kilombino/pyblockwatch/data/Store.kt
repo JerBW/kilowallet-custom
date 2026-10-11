@@ -215,6 +215,20 @@ class Store(context: Context, private val profile: String = HOT) {
             ?.let { runCatching { ScriptType.valueOf(it) }.getOrNull() } ?: ScriptType.P2WPKH
         set(v) = prefs.edit().putString(k(KEY_SCRIPT), v.name).apply()
 
+    /**
+     * Hot wallet only: the seed's Taproot account (BIP-86, m/86'/0'/0'), next to the BIP-84 one in
+     * [xpub]. Once set it is always scanned, so its coins stay visible and spendable whichever
+     * kind of address [receiveTaproot] hands out. Null until Taproot is turned on.
+     */
+    var taprootXpub: String?
+        get() = prefs.getString(k("taproot_xpub"), null)
+        set(v) = prefs.edit().apply { if (v == null) remove(k("taproot_xpub")) else putString(k("taproot_xpub"), v) }.apply()
+
+    /** Hot wallet: new receive and change addresses are Taproot (bc1p) instead of native SegWit. */
+    var receiveTaproot: Boolean
+        get() = prefs.getBoolean(k("receive_taproot"), false)
+        set(v) = prefs.edit().putBoolean(k("receive_taproot"), v).apply()
+
     // ---------------------------------------------------------------- optional features
     // Ark and Coinjoin are opt-in: a new user sees what they are and accepts before using them.
 
@@ -260,7 +274,7 @@ class Store(context: Context, private val profile: String = HOT) {
 
     fun clearWallet() {
         prefs.edit().apply {
-            remove(k(KEY_XPUB)); remove(k(KEY_LABEL))
+            remove(k(KEY_XPUB)); remove(k(KEY_LABEL)); remove(k("taproot_xpub")); remove(k("receive_taproot"))
             Chain.entries.forEach {
                 remove(k(keyTotal(it))); remove(k(keyConf(it))); remove(k(keyUnconf(it)))
                 remove(k(keyNotConf(it))); remove(k(keyNotUnconf(it))); remove(k(keyPending(it)))

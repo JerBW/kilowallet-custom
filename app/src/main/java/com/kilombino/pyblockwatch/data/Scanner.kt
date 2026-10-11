@@ -24,6 +24,8 @@ data class AddressRow(
     val confirmed: Long = 0,
     val unconfirmed: Long = 0,
     val txCount: Int = 0,
+    /** Set for an address of the hot wallet's second account (Taproot); null = the wallet's own type. */
+    val type: ScriptType? = null,
 ) {
     val total: Long get() = confirmed + unconfirmed
     val isUsed: Boolean get() = txCount > 0 || total > 0
@@ -70,6 +72,9 @@ class Scanner(
     private val dispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) {
 
+    /** A second account walked after the main one; its rows carry [type]. */
+    data class Extra(val xpub: String, val type: ScriptType)
+
     fun scan(
         xpub: String,
         chain: Chain,
@@ -77,11 +82,13 @@ class Scanner(
         pinnedFingerprint: String?,
         scriptType: ScriptType,
         gap: Int = gapLimit,
+        extra: Extra? = null,
     ): Flow<ScanEvent> = flow {
-        val purpose = purposeFor(scriptType)
         val txHeights = HashMap<String, Int>()
-        val parsed = try {
-            Bip32.parseExtendedPubKey(xpub)
+        // The main account, then (for a hot wallet with Taproot on) its BIP-86 account.
+        val accounts = try {
+            listOf(Triple(Bip32.parseExtendedPubKey(xpub), scriptType, null as ScriptType?)) +
+                listOfNotNull(extra?.let { Triple(Bip32.parseExtendedPubKey(it.xpub), it.type, it.type) })
         } catch (e: IllegalArgumentException) {
             emit(ScanEvent.Failed(e.message ?: "Invalid extended key")); return@flow
         }
@@ -106,7 +113,8 @@ class Scanner(
 
             // Receive chain then change chain. Both are scanned: a wallet's balance
             // lives on both, and showing only the receive side under-reports funds.
-            for (chainIndex in 0..1) {
+            for ((parsed, type, tag) in accounts) for (chainIndex in 0..1) {
+                val purpose = purposeFor(type)
                 val branch = Bip32.deriveChild(parsed, chainIndex)
                 var index = 0
                 var consecutiveEmpty = 0
@@ -115,8 +123,8 @@ class Scanner(
                     emit(ScanEvent.Deriving(chainIndex, index, path))
 
                     val child = Bip32.deriveChild(branch, index)
-                    val scriptHash = Address.scriptHashFor(child.pubkey(), scriptType)
-                    val address = Address.encode(child.pubkey(), scriptType)
+                    val scriptHash = Address.scriptHashFor(child.pubkey(), type)
+                    val address = Address.encode(child.pubkey(), type)
 
                     // History first, balance only when there IS history. Most addresses
                     // in a scan are unused, and asking for a balance we already know is
@@ -128,7 +136,7 @@ class Scanner(
                     val row = AddressRow(
                         chainIndex = chainIndex, index = index, address = address,
                         path = path, scriptHash = scriptHash,
-                        confirmed = bal.confirmed, unconfirmed = bal.unconfirmed, txCount = txs,
+                        confirmed = bal.confirmed, unconfirmed = bal.unconfirmed, txCount = txs, type = tag,
                     )
                     if (row.isUsed) {
                         rows += row
@@ -240,6 +248,8 @@ class Scanner(
     data class SpendableUtxo(
         val txid: String, val vout: Int, val value: Long,
         val chainIndex: Int, val index: Int, val height: Int,
+        /** Taproot coin of a hot wallet's second account; null = the wallet's own type. */
+        val type: ScriptType? = null,
     )
 
     /** Every unspent output in [rows], immature mined rewards included (for display). */
@@ -250,7 +260,7 @@ class Scanner(
         return try {
             client.connect()
             rows.flatMap { r ->
-                client.listUnspent(r.scriptHash).map { SpendableUtxo(it.txid, it.vout, it.value, r.chainIndex, r.index, it.height) }
+                client.listUnspent(r.scriptHash).map { SpendableUtxo(it.txid, it.vout, it.value, r.chainIndex, r.index, it.height, r.type) }
             }
         } finally {
             client.close()
@@ -266,7 +276,7 @@ class Scanner(
             client.connect()
             val all = rows.flatMap { r ->
                 client.listUnspent(r.scriptHash).map {
-                    SpendableUtxo(it.txid, it.vout, it.value, r.chainIndex, r.index, it.height)
+                    SpendableUtxo(it.txid, it.vout, it.value, r.chainIndex, r.index, it.height, r.type)
                 }
             }
             // A mined reward (coinbase) can't be spent until it matures; a spend using one would

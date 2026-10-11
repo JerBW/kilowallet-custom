@@ -64,7 +64,10 @@ class WatchService : Service() {
                 val notifier = Notifier(this, if (wallet == Store.WATCH) "Watch-only · " else "")
                 for (chain in Chain.entries.filter { it != Chain.SHA256 || store.spamchainAccepted }) {
                     runCatching {
-                        val rows = deriveKnownAddresses(xpub, chain, ws)
+                        // A hot wallet's Taproot account is watched too: its coins count in the balance.
+                        val taproot = ws.taprootXpub.takeIf { wallet == Store.HOT }
+                        val rows = deriveKnownAddresses(xpub, chain, ws) +
+                            (taproot?.let { deriveKnownAddresses(it, chain, ws, com.kilombino.pyblockwatch.crypto.ScriptType.P2TR) } ?: emptyList())
                         if (rows.isEmpty()) return@runCatching
                         val endpoint = store.endpoint(chain)
                         val (updated, txs, _) = scanner.refreshDetails(rows, endpoint, store.pinnedFingerprint(endpoint))
@@ -126,9 +129,11 @@ class WatchService : Service() {
      * storage, not the address list, so this walks the same deterministic path the
      * scanner did — cheap, and it keeps a single source of truth for derivation.
      */
-    private fun deriveKnownAddresses(xpub: String, chain: Chain, store: Store): List<AddressRow> {
+    private fun deriveKnownAddresses(
+        xpub: String, chain: Chain, store: Store, tag: com.kilombino.pyblockwatch.crypto.ScriptType? = null,
+    ): List<AddressRow> {
         val account = runCatching { Bip32.parseExtendedPubKey(xpub) }.getOrNull() ?: return emptyList()
-        val type = store.scriptType
+        val type = tag ?: store.scriptType
         val out = mutableListOf<AddressRow>()
         for (chainIndex in 0..1) {
             // Every address used so far plus the gap, not just the first [gapLimit]: a wallet
@@ -141,7 +146,7 @@ class WatchService : Service() {
                 out += AddressRow(
                     chainIndex = chainIndex, index = i,
                     address = Address.encode(child.pubkey(), type),
-                    path = "m/$chainIndex/$i", scriptHash = sh,
+                    path = "m/$chainIndex/$i", scriptHash = sh, type = tag,
                 )
             }
         }

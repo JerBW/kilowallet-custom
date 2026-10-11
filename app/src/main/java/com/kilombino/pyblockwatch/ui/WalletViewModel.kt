@@ -163,6 +163,10 @@ data class UiState(
     /** "USD" or "EUR". */
     val fiat: String = "USD",
     val market: com.kilombino.pyblockwatch.data.MarketData? = null,
+    /** Hot wallet: its Taproot account (BIP-86), null until turned on; always scanned once set. */
+    val taprootXpub: String? = null,
+    /** Hot wallet: new receive and change addresses are Taproot (bc1p). */
+    val receiveTaproot: Boolean = false,
 ) {
     val current: ChainState get() = chains[selected] ?: ChainState()
     val hasWallet: Boolean get() = !xpub.isNullOrBlank()
@@ -233,6 +237,8 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
                 uiMode = store.uiMode,
                 fiat = store.fiat,
                 market = com.kilombino.pyblockwatch.data.MarketFeed.cached(app),
+                taprootXpub = store.taprootXpub.takeIf { seedVault.hasSeed() && store.activeWallet != Store.WATCH },
+                receiveTaproot = store.receiveTaproot,
             )
         }
         // 0.19.0 had coinjoin without the opt-in: whoever already took part keeps it on.
@@ -309,7 +315,7 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
                 var doneRows: List<AddressRow>? = null
                 var doneTxs: List<TxConf> = emptyList()
                 var tip = cs.height
-                scanner.scan(xpub, chain, endpoint, pin, ws.scriptType, ws.gapLimit).collect { ev ->
+                scanner.scan(xpub, chain, endpoint, pin, ws.scriptType, ws.gapLimit, extraAccount()).collect { ev ->
                     when (ev) {
                         is ScanEvent.Connected ->
                             if (pin == null && ev.fingerprint != null) ws.pinFingerprint(endpoint, ev.fingerprint)
@@ -376,6 +382,7 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
         _state.update {
             it.copy(
                 xpub = trimmed, label = label, scriptType = chosen, inputError = null,
+                taprootXpub = null, receiveTaproot = false,
                 isHot = false, hasSeed = seedVault.hasSeed(), setupMode = false, uiMode = store.uiMode,
                 chains = Chain.entries.associateWith { ChainState() },
             )
@@ -405,6 +412,42 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
         }
         if (!_state.value.xpub.isNullOrBlank()) scannableChains().forEach { scan(it) }
     }
+
+    /**
+     * Hot wallet: hand out Taproot (bc1p, BIP-86) or native SegWit (bc1q, BIP-84) addresses for
+     * new payments and change. Both accounts are scanned and spent from once Taproot exists, so
+     * switching back and forth never hides a coin. A wallet made before Taproot has no BIP-86
+     * account yet: [decryptCipher] (authorised) is then needed once to derive it from the seed.
+     */
+    fun setReceiveTaproot(on: Boolean, decryptCipher: javax.crypto.Cipher? = null, onError: (String) -> Unit = {}) {
+        if (!_state.value.isHot) return
+        viewModelScope.launch {
+            runCatching {
+                val known = store.taprootXpub
+                if (on && known == null) {
+                    val cipher = decryptCipher ?: error("Unlock the wallet to add its Taproot addresses.")
+                    val tpub = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                        val secret = seedVault.revealSecret(cipher)
+                        val master = com.kilombino.pyblockwatch.crypto.Bip32Priv
+                            .fromSeed(com.kilombino.pyblockwatch.crypto.Bip39.toSeed(secret.words, secret.passphrase))
+                        com.kilombino.pyblockwatch.crypto.Bip32Priv.accountXpub(master, purpose = 86, account = 0)
+                    }
+                    store.taprootXpub = tpub
+                }
+                store.receiveTaproot = on
+                val firstTime = known == null && on
+                _state.update {
+                    it.copy(taprootXpub = store.taprootXpub, receiveTaproot = on,
+                        chains = if (firstTime) Chain.entries.associateWith { ChainState() } else it.chains)
+                }
+                // Its Taproot account is new to the scan: look for coins on it straight away.
+                if (firstTime) scannableChains().forEach { scan(it) }
+            }.onFailure { onError(it.message ?: "Could not turn Taproot on.") }
+        }
+    }
+
+    /** Whether turning Taproot on needs the seed (the BIP-86 account was never derived). */
+    fun taprootNeedsUnlock(): Boolean = _state.value.isHot && store.taprootXpub == null
 
     fun clearError() = _state.update { it.copy(inputError = null) }
 
@@ -560,7 +603,7 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
 
         jobs[chain] = viewModelScope.launch {
             val found = mutableListOf<AddressRow>()
-            scanner.scan(xpub, chain, endpoint, pin, ws.scriptType, ws.gapLimit).collect { ev ->
+            scanner.scan(xpub, chain, endpoint, pin, ws.scriptType, ws.gapLimit, extraAccount()).collect { ev ->
                 updateIf(xpub, chain) { st ->
                     when (ev) {
                         is ScanEvent.Connecting ->
@@ -627,10 +670,12 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
                         ctx, ark.words(ctx) == mnemonic && ark.passphrase(ctx) == passphrase,
                     )
                 }
-                val zpub = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                // The BIP-84 account, and the BIP-86 (Taproot) one so it can be turned on without the seed.
+                val (zpub, tpub) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
                     val master = com.kilombino.pyblockwatch.crypto.Bip32Priv
                         .fromSeed(com.kilombino.pyblockwatch.crypto.Bip39.toSeed(mnemonic, passphrase))
-                    com.kilombino.pyblockwatch.crypto.Bip32Priv.accountXpub(master, purpose = 84, account = 0)
+                    com.kilombino.pyblockwatch.crypto.Bip32Priv.accountXpub(master, purpose = 84, account = 0) to
+                        com.kilombino.pyblockwatch.crypto.Bip32Priv.accountXpub(master, purpose = 86, account = 0)
                 }
                 store = Store(getApplication(), Store.HOT)
                 store.activeWallet = Store.HOT
@@ -638,9 +683,11 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
                 store.xpub = zpub
                 store.label = "Hot wallet"
                 store.scriptType = ScriptType.P2WPKH
+                store.taprootXpub = tpub
                 _state.update {
                     it.copy(
                         xpub = zpub, label = "Hot wallet", scriptType = ScriptType.P2WPKH,
+                        taprootXpub = tpub, receiveTaproot = store.receiveTaproot,
                         isHot = true, hasSeed = true, inputError = null, setupMode = false, uiMode = store.uiMode,
                         chains = Chain.entries.associateWith { ChainState() },
                     )
@@ -769,6 +816,8 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
                 notificationsEnabled = store.notificationsEnabled, gapLimit = store.gapLimit,
                 isHot = seedVault.hasSeed() && store.activeWallet != Store.WATCH, hasSeed = seedVault.hasSeed(),
                 uiMode = store.uiMode, fiat = store.fiat,
+                taprootXpub = store.taprootXpub.takeIf { seedVault.hasSeed() && store.activeWallet != Store.WATCH },
+                receiveTaproot = store.receiveTaproot,
                 chains = Chain.entries.associateWith { ChainState() },
             )
         }
@@ -994,8 +1043,7 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
      * is signed, instead of as a mysteriously invalid transaction.
      */
     private suspend fun verifyCoins(chain: Chain, coins: List<Scanner.SpendableUtxo>) {
-        val xpub = _state.value.xpub ?: return
-        val parsed = com.kilombino.pyblockwatch.crypto.Bip32.parseExtendedPubKey(xpub)
+        if (_state.value.xpub == null) return
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             val c = client(chain)
             try {
@@ -1005,8 +1053,7 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
                     val tx = txs.getOrPut(u.txid) { com.kilombino.pyblockwatch.crypto.TxParse.parse(c.transaction(u.txid)) }
                     val out = tx.outputs.getOrNull(u.vout)
                         ?: error("The server listed a coin that does not exist (${u.txid.take(8)}…:${u.vout}). Nothing was signed.")
-                    val script = com.kilombino.pyblockwatch.crypto.Address.scriptPubKey(
-                        com.kilombino.pyblockwatch.crypto.Bip32.derivePath(parsed, u.chainIndex, u.index).pubkey(), store.scriptType)
+                    val script = coinScript(u)
                     require(out.value == u.value && out.scriptPubKey.contentEquals(script)) {
                         "The server's data about a coin (${u.txid.take(8)}…:${u.vout}) does not match the transaction itself. " +
                             "Nothing was signed; try another server."
@@ -1021,7 +1068,7 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
      * than 5% of what is sent. The review then asks for a second, explicit confirmation.
      */
     fun feeConcern(d: SendDraft): String? {
-        val vbytes = estimateFee(d.inputs.size, d.outputs.map { it.scriptPubKey }, 1.0).coerceAtLeast(1)
+        val vbytes = estimateFee(d.inputs.size, d.outputs.map { it.scriptPubKey }, 1.0, taprootIn(d.inputs)).coerceAtLeast(1)
         val rate = d.fee.toDouble() / vbytes
         val sent = if (d.cpfpParent != null) d.amount + d.fee else d.totalSent
         val reasons = buildList {
@@ -1043,7 +1090,7 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
     fun prepareCpfp(txid: String, ratePerVb: Double) {
         val chain = _state.value.selected
         val cs = _state.value.chains[chain] ?: return
-        val xpub = _state.value.xpub ?: return
+        if (_state.value.xpub == null) return
         _state.update { it.copy(sendPhase = SendPhase.Preparing) }
         viewModelScope.launch {
             runCatching {
@@ -1065,11 +1112,11 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
                         val ours = tx.outputs.mapIndexedNotNull { n, o ->
                             val row = byHash[com.kilombino.pyblockwatch.crypto.Address.electrumScriptHash(o.scriptPubKey)] ?: return@mapIndexedNotNull null
                             if ("$txid:$n" !in unspent) return@mapIndexedNotNull null
-                            Scanner.SpendableUtxo(txid, n, o.value, row.chainIndex, row.index, 0)
+                            Scanner.SpendableUtxo(txid, n, o.value, row.chainIndex, row.index, 0, row.type)
                         }
                         require(ours.isNotEmpty()) { "This transaction has no unspent output of this wallet to speed it up with." }
-                        val to = changeScriptPubKey(xpub, nextChangeIndex(cs.rows))
-                        val childVsize = estimateFee(ours.size, listOf(to), 1.0)
+                        val to = changeScriptPubKey(nextChangeIndex(cs.rows))
+                        val childVsize = estimateFee(ours.size, listOf(to), 1.0, taprootIn(ours))
                         val need = kotlin.math.ceil(rate * (parentVsize + childVsize)).toLong() - parentFee
                         require(need > childVsize) {
                             "It already pays ${"%.1f".format(java.util.Locale.ROOT, parentFee.toDouble() / parentVsize)} sat/vB: " +
@@ -1115,7 +1162,7 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
                             val prev = com.kilombino.pyblockwatch.crypto.TxParse.parse(client.transaction(i.txid)).outputs[i.vout]
                             val row = byHash[com.kilombino.pyblockwatch.crypto.Address.electrumScriptHash(prev.scriptPubKey)]
                                 ?: error("This transaction spends coins that are not in this wallet: it can't be replaced from here.")
-                            com.kilombino.pyblockwatch.data.Scanner.SpendableUtxo(i.txid, i.vout, prev.value, row.chainIndex, row.index, 0)
+                            com.kilombino.pyblockwatch.data.Scanner.SpendableUtxo(i.txid, i.vout, prev.value, row.chainIndex, row.index, 0, row.type)
                         }
                         val outs = tx.outputs.map { com.kilombino.pyblockwatch.crypto.TxBuilder.Output(it.scriptPubKey, it.value) }
                         fun ours(o: com.kilombino.pyblockwatch.crypto.TxBuilder.Output) =
@@ -1124,8 +1171,8 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
                             ?: error("This send has no change output to pay a higher fee from.")
                         val oldFee = inputs.sumOf { it.value } - outs.sumOf { it.value }
                         val newFee = maxOf(
-                            estimateFee(inputs.size, outs.map { it.scriptPubKey }, ratePerVb.coerceIn(0.1, 1000.0)),
-                            oldFee + estimateFee(inputs.size, outs.map { it.scriptPubKey }, 1.0) + 1,
+                            estimateFee(inputs.size, outs.map { it.scriptPubKey }, ratePerVb.coerceIn(0.1, 1000.0), taprootIn(inputs)),
+                            oldFee + estimateFee(inputs.size, outs.map { it.scriptPubKey }, 1.0, taprootIn(inputs)) + 1,
                         )
                         val change = outs[changeIdx].value - (newFee - oldFee)
                         require(change > DUST_SATS) {
@@ -1203,7 +1250,7 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
     ) {
         val chain = _state.value.selected
         val cs = _state.value.chains[chain] ?: return
-        val xpub = _state.value.xpub ?: return
+        if (_state.value.xpub == null) return
         _state.update { it.copy(sendPhase = SendPhase.Preparing) }
         viewModelScope.launch {
             runCatching {
@@ -1241,7 +1288,7 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
                 val totalOut = amountSats + extraOuts.sumOf { it.value }
 
                 val changeScript = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
-                    changeScriptPubKey(xpub, nextChangeIndex(cs.rows))
+                    changeScriptPubKey(nextChangeIndex(cs.rows))
                 }
                 val withChange = listOf(toScript) + extraOuts.map { it.scriptPubKey } + changeScript
                 val noChange = listOf(toScript) + extraOuts.map { it.scriptPubKey }
@@ -1261,18 +1308,18 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
                     var s = 0L
                     for (u in utxos.sortedByDescending { it.value }) {
                         acc += u; s += u.value
-                        if (s >= totalOut + estimateFee(acc.size, withChange, rate)) break
+                        if (s >= totalOut + estimateFee(acc.size, withChange, rate, taprootIn(acc))) break
                     }
                     chosen = acc; sum = s
                 }
 
                 verifyCoins(chain, chosen)
-                var fee = estimateFee(chosen.size, withChange, rate)
+                var fee = estimateFee(chosen.size, withChange, rate, taprootIn(chosen))
                 // Sending everything (MAX) has no change output: size the fee without it. Then there
                 // must be no change output either, or the transaction would pay a fee sized for one
                 // output less than it has.
                 var noChangeOutput = false
-                if (sum < totalOut + fee) { fee = estimateFee(chosen.size, noChange, rate); noChangeOutput = true }
+                if (sum < totalOut + fee) { fee = estimateFee(chosen.size, noChange, rate, taprootIn(chosen)); noChangeOutput = true }
                 require(sum >= totalOut + fee) {
                     if (selected.isNotEmpty()) "The chosen coins don't cover the amount plus fee."
                     else "Not enough funds for the amount plus fee."
@@ -1307,7 +1354,7 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
         val u = if (selected.isNotEmpty()) selected else _state.value.utxos ?: emptyList()
         if (u.isEmpty()) return 0
         // A P2TR output (the largest common one) so MAX never undershoots the rate for any address.
-        val fee = estimateFee(u.size, listOf(ByteArray(34)), feeRatePerVb.coerceIn(0.1, 1000.0))
+        val fee = estimateFee(u.size, listOf(ByteArray(34)), feeRatePerVb.coerceIn(0.1, 1000.0), taprootIn(u))
         return (u.sumOf { it.value } - fee).coerceAtLeast(0)
     }
 
@@ -1379,11 +1426,40 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun nextReceiveIndex(): Int = nextUnused(0)
 
-    private fun nextUnused(chainIndex: Int): Int {
-        val seen = _state.value.chains.values.flatMap { it.rows }.filter { it.chainIndex == chainIndex }
+    /**
+     * Which account new addresses come from: [ScriptType.P2TR] for the hot wallet's Taproot one
+     * when it is on, null for the wallet's own (BIP-84 native SegWit for a hot wallet).
+     */
+    private val newTag: ScriptType?
+        get() = ScriptType.P2TR.takeIf { _state.value.isHot && _state.value.receiveTaproot && _state.value.taprootXpub != null }
+
+    /** The account xpub behind a row/coin tag (see [AddressRow.type]). */
+    private fun xpubFor(tag: ScriptType?): String? = if (tag == null) _state.value.xpub else _state.value.taprootXpub
+
+    /** The address type behind a row/coin tag. */
+    private fun typeFor(tag: ScriptType?): ScriptType = tag ?: store.scriptType
+
+    /** The hot wallet's Taproot account, scanned next to the main one once it exists. */
+    private fun extraAccount(): Scanner.Extra? =
+        _state.value.taprootXpub?.takeIf { _state.value.isHot }?.let { Scanner.Extra(it, ScriptType.P2TR) }
+
+    /** How many of [coins] are Taproot: they weigh less than the native SegWit ones. */
+    private fun taprootIn(coins: List<Scanner.SpendableUtxo>): Int = coins.count { typeFor(it.type) == ScriptType.P2TR }
+
+    /** The scriptPubKey a coin of this wallet is locked to, derived publicly from its account. */
+    private fun coinScript(u: Scanner.SpendableUtxo): ByteArray {
+        val parsed = com.kilombino.pyblockwatch.crypto.Bip32.parseExtendedPubKey(xpubFor(u.type) ?: error("No wallet."))
+        return com.kilombino.pyblockwatch.crypto.Address.scriptPubKey(
+            com.kilombino.pyblockwatch.crypto.Bip32.derivePath(parsed, u.chainIndex, u.index).pubkey(), typeFor(u.type))
+    }
+
+    /** Next unused index of [chainIndex] in the account [tag] picks (the one new addresses come from by default). */
+    private fun nextUnused(chainIndex: Int, tag: ScriptType? = newTag): Int {
+        val seen = _state.value.chains.values.flatMap { it.rows }.filter { it.chainIndex == chainIndex && it.type == tag }
             .maxOfOrNull { it.index }?.plus(1) ?: 0
-        val top = maxOf(seen, _state.value.xpub?.let { store.usedTop(it, chainIndex) } ?: 0)
-        return maxOf(top, coinjoinReservedTop(chainIndex, top))
+        val top = maxOf(seen, xpubFor(tag)?.let { store.usedTop(it, chainIndex) } ?: 0)
+        // Coinjoin seats only ever hold native SegWit addresses.
+        return if (tag == null) maxOf(top, coinjoinReservedTop(chainIndex, top)) else top
     }
 
     /**
@@ -1430,18 +1506,24 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Remember how far each branch has been used, so the other chain knows before its own scan. */
     private fun noteUsed(rows: List<AddressRow>) {
-        val xpub = _state.value.xpub ?: return
-        for (ci in 0..1) rows.filter { it.chainIndex == ci }.maxOfOrNull { it.index }?.let { store.noteUsedTop(xpub, ci, it + 1) }
+        for (tag in listOf(null, ScriptType.P2TR)) {
+            val xpub = xpubFor(tag) ?: continue
+            for (ci in 0..1) rows.filter { it.chainIndex == ci && it.type == tag }.maxOfOrNull { it.index }
+                ?.let { store.noteUsedTop(xpub, ci, it + 1) }
+        }
     }
 
     /** Derive receive address [index] and its BIP-32 path, publicly from the xpub (no seed). */
-    fun receiveAddress(index: Int): Pair<String, String>? {
-        val xpub = _state.value.xpub ?: return null
+    fun receiveAddress(index: Int): Pair<String, String>? = receiveAddress(index, newTag)
+
+    private fun receiveAddress(index: Int, tag: ScriptType?): Pair<String, String>? {
+        val xpub = xpubFor(tag) ?: return null
+        val type = typeFor(tag)
         return runCatching {
             val parsed = com.kilombino.pyblockwatch.crypto.Bip32.parseExtendedPubKey(xpub)
             val pub = com.kilombino.pyblockwatch.crypto.Bip32.derivePath(parsed, 0, index).pubkey()
-            val addr = com.kilombino.pyblockwatch.crypto.Address.encode(pub, store.scriptType)
-            addr to "m/${Scanner.purposeFor(store.scriptType)}'/0'/0'/0/$index"
+            val addr = com.kilombino.pyblockwatch.crypto.Address.encode(pub, type)
+            addr to "m/${Scanner.purposeFor(type)}'/0'/0'/0/$index"
         }.getOrNull()
     }
 
@@ -1455,24 +1537,28 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(sendPhase = SendPhase.Broadcasting) }
         viewModelScope.launch {
             runCatching {
-                val purpose = Scanner.purposeFor(store.scriptType)
                 val signed = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
                     val secret = seedVault.revealSecret(decryptCipher)
                     val master = com.kilombino.pyblockwatch.crypto.Bip32Priv
                         .fromSeed(com.kilombino.pyblockwatch.crypto.Bip39.toSeed(secret.words, secret.passphrase))
                     val inputs = draft.inputs.map { u ->
+                        // Each coin with its own account's key: BIP-84, or BIP-86 for a Taproot one.
+                        val type = typeFor(u.type)
                         val node = com.kilombino.pyblockwatch.crypto.Bip32Priv
-                            .derivePath(master, "m/$purpose'/0'/0'/${u.chainIndex}/${u.index}")
+                            .derivePath(master, "m/${Scanner.purposeFor(type)}'/0'/0'/${u.chainIndex}/${u.index}")
                         // 0xfffffffd signals replace-by-fee (BIP-125), so a stuck send can be bumped.
                         com.kilombino.pyblockwatch.crypto.TxBuilder.Input(
-                            u.txid, u.vout, u.value, node.key, node.publicKey(), 0xfffffffdL,
-                        )
+                            u.txid, u.vout, u.value, node.key, node.publicKey(), 0xfffffffdL, type,
+                        ).also {
+                            check(it.spentScript.contentEquals(coinScript(u))) { "A coin's key does not match its address. Nothing was signed." }
+                        }
                     }
                     // Silent payment: now that the input keys are known, compute the real Taproot
                     // output and swap it in for the placeholder at index 0.
                     val outputs = draft.silentRecipient?.let { sp ->
                         val spInputs = inputs.map {
-                            com.kilombino.pyblockwatch.crypto.SilentPayment.Input(it.privateKey, it.txid, it.vout)
+                            com.kilombino.pyblockwatch.crypto.SilentPayment.Input(
+                                com.kilombino.pyblockwatch.crypto.SilentPayment.inputKey(it.privateKey, it.type == ScriptType.P2TR), it.txid, it.vout)
                         }
                         val spScript = com.kilombino.pyblockwatch.crypto.SilentPayment.outputScript(sp, spInputs, 0)
                         draft.outputs.mapIndexed { i, o ->
@@ -1583,7 +1669,7 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
      * made a 1 sat/vB send to a Taproot address go out at 0.92 sat/vB, below most nodes' relay
      * minimum, and it never propagated.
      */
-    private fun estimateFee(nIn: Int, outputScripts: List<ByteArray>, ratePerVb: Double): Long {
+    private fun estimateFee(nIn: Int, outputScripts: List<ByteArray>, ratePerVb: Double, taprootIn: Int = 0): Long {
         // A watch-only wallet may spend nested SegWit or Taproot coins, which weigh differently.
         val perInput = when {
             _state.value.isHot -> 68.0
@@ -1591,7 +1677,9 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
             store.scriptType == ScriptType.P2TR -> 57.5
             else -> 68.0
         }
-        val vbytes = 10.5 + perInput * nIn + outputScripts.sumOf { 9.0 + it.size }
+        // A hot wallet's Taproot coins: key-path signature plus the unified sighash byte (57.75 vB).
+        val tr = if (_state.value.isHot) taprootIn.coerceIn(0, nIn) else 0
+        val vbytes = 10.5 + perInput * (nIn - tr) + 57.75 * tr + outputScripts.sumOf { 9.0 + it.size }
         return kotlin.math.ceil(vbytes * ratePerVb).toLong()
     }
 
@@ -1599,11 +1687,14 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
     @Suppress("UNUSED_PARAMETER")
     private fun nextChangeIndex(rows: List<AddressRow>): Int = nextUnused(1)
 
-    /** The change output's scriptPubKey, derived publicly from the account xpub (no seed needed). */
-    private fun changeScriptPubKey(xpub: String, index: Int): ByteArray {
-        val parsed = com.kilombino.pyblockwatch.crypto.Bip32.parseExtendedPubKey(xpub)
+    /**
+     * The change output's scriptPubKey, derived publicly from the account xpub (no seed needed):
+     * by default from the account new addresses come from, so Taproot on means Taproot change.
+     */
+    private fun changeScriptPubKey(index: Int, tag: ScriptType? = newTag): ByteArray {
+        val parsed = com.kilombino.pyblockwatch.crypto.Bip32.parseExtendedPubKey(xpubFor(tag) ?: error("No wallet."))
         val pub = com.kilombino.pyblockwatch.crypto.Bip32.derivePath(parsed, 1, index).pubkey()
-        return com.kilombino.pyblockwatch.crypto.Address.scriptPubKey(pub, store.scriptType)
+        return com.kilombino.pyblockwatch.crypto.Address.scriptPubKey(pub, typeFor(tag))
     }
 
     // ------------------------------------------------------------------ coinjoin
@@ -1633,8 +1724,8 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
         val u = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             scanner.listCoins(rows, endpoint, store.pinnedFingerprint(endpoint))
         }
-        val byKey = rows.associateBy { it.chainIndex to it.index }
-        return u.groupBy { byKey[it.chainIndex to it.index]?.scriptHash ?: "" }
+        val byKey = rows.associateBy { Triple(it.type, it.chainIndex, it.index) }
+        return u.groupBy { byKey[Triple(it.type, it.chainIndex, it.index)]?.scriptHash ?: "" }
     }
 
     suspend fun coinjoinCoins(): List<Scanner.SpendableUtxo> {
@@ -1643,7 +1734,8 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
         val u = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             scanner.gatherUtxos(cs.rows.filter { it.isUsed }, endpoint, store.pinnedFingerprint(endpoint))
         }
-        return notInCoinjoin(Chain.BLAKE2B, u).filter { it.height > 0 }.sortedByDescending { it.value }
+        // Native SegWit only: every input and output of a round must look the same.
+        return notInCoinjoin(Chain.BLAKE2B, u).filter { it.height > 0 && it.type == null }.sortedByDescending { it.value }
     }
 
     /**
@@ -1661,13 +1753,13 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
         val node = com.kilombino.pyblockwatch.crypto.Bip32Priv.derivePath(master, path)
         // Held by the pool's saved state (coinjoinReservedTop), not marked used: if the pool is
         // cancelled before anything is posted, the next payment or pool takes them again.
-        val mixIndex = nextUnused(0)
-        val changeIndex = nextUnused(1)
+        val mixIndex = nextUnused(0, null)
+        val changeIndex = nextUnused(1, null)
         val parsed = com.kilombino.pyblockwatch.crypto.Bip32.parseExtendedPubKey(xpub)
         fun script(branch: Int, i: Int) = com.kilombino.pyblockwatch.crypto.Address.scriptPubKey(
             com.kilombino.pyblockwatch.crypto.Bip32.derivePath(parsed, branch, i).pubkey(), store.scriptType)
         return com.kilombino.pyblockwatch.coinjoin.CoinjoinHub.Pick(
-            u.txid, u.vout, u.value, node, path, script(0, mixIndex), changeScriptPubKey(xpub, changeIndex),
+            u.txid, u.vout, u.value, node, path, script(0, mixIndex), changeScriptPubKey(changeIndex, null),
         )
     }
 
@@ -1696,8 +1788,9 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
                 require(sum >= target + estimateFee(pick.size, 1, feeRate)) {
                     "Not enough coins that were never mixed to make ${target} sats (mixed outputs are kept apart)."
                 }
-                val i = nextUnused(0); store.noteUsedTop(xpub, 0, i + 1)
-                val to = receiveAddress(i)?.first ?: error("no address")
+                // The pool's coin is native SegWit, whichever kind of address the wallet hands out.
+                val i = nextUnused(0, null); store.noteUsedTop(xpub, 0, i + 1)
+                val to = receiveAddress(i, null)?.first ?: error("no address")
                 _state.update { it.copy(utxos = coins, utxosChain = Chain.BLAKE2B) }
                 prepareSend(to, target, feeRate, pick)
             }.onFailure { e -> _state.update { it.copy(sendPhase = SendPhase.Failed(e.message ?: "Could not prepare the coin.")) } }
@@ -1710,17 +1803,19 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
         // The Ark wallet's own deposit address is ours too, not a contact.
         if (runCatching { com.kilombino.pyblockwatch.ark.Ark.isOwnAddress(getApplication(), a) }.getOrDefault(false)) return true
         if (_state.value.chains.values.any { cs -> cs.rows.any { it.address == a } }) return true
-        val xpub = _state.value.xpub ?: return false
-        return runCatching {
-            val parsed = com.kilombino.pyblockwatch.crypto.Bip32.parseExtendedPubKey(xpub)
-            (0..1).any { ci ->
-                val branch = com.kilombino.pyblockwatch.crypto.Bip32.deriveChild(parsed, ci)
-                (0 until store.usedTop(xpub, ci) + store.gapLimit).any { i ->
-                    com.kilombino.pyblockwatch.crypto.Address.encode(
-                        com.kilombino.pyblockwatch.crypto.Bip32.deriveChild(branch, i).pubkey(), store.scriptType) == a
+        return listOf(null, ScriptType.P2TR).any { tag ->
+            val xpub = xpubFor(tag) ?: return@any false
+            runCatching {
+                val parsed = com.kilombino.pyblockwatch.crypto.Bip32.parseExtendedPubKey(xpub)
+                (0..1).any { ci ->
+                    val branch = com.kilombino.pyblockwatch.crypto.Bip32.deriveChild(parsed, ci)
+                    (0 until store.usedTop(xpub, ci) + store.gapLimit).any { i ->
+                        com.kilombino.pyblockwatch.crypto.Address.encode(
+                            com.kilombino.pyblockwatch.crypto.Bip32.deriveChild(branch, i).pubkey(), typeFor(tag)) == a
+                    }
                 }
-            }
-        }.getOrDefault(false)
+            }.getOrDefault(false)
+        }
     }
 
     /** The coin's private key again, for signing the round at the end. */
