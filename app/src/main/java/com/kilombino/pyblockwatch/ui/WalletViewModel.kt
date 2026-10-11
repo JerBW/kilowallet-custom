@@ -795,7 +795,8 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
                         chains = Chain.entries.associateWith { ChainState() },
                     )
                 }
-                scannableChains().forEach { scan(it) }
+                // A wallet restored from a backup file opens on what it remembered (if anything).
+                scannableChains().forEach { look(it) }
                 onDone()
             }.onFailure { e ->
                 seedVault.clear()

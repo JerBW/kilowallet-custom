@@ -7,7 +7,8 @@ import org.json.JSONObject
 /**
  * The app's own state for the backup file, next to the words and the Ark wallet: every
  * setting (nodes, explorers, mode, fiat, derivation, gap limit, notifications, used
- * addresses, Ark/Coinjoin opt-ins…) and the coinjoin rounds kept on this phone. No secret
+ * addresses, Ark/Coinjoin opt-ins…), the coinjoin rounds kept on this phone and what the
+ * wallet remembers from its last looks (so a restored phone does not start its scan blind). No secret
  * lives in these preferences: the seed stays in the Keystore and travels as the words.
  *
  * Values are tagged with their type, because JSON cannot tell an Int from a Long and
@@ -56,7 +57,41 @@ object AppBackup {
         return JSONObject()
             .put("store", dump(app.getSharedPreferences(STORE, Context.MODE_PRIVATE).all))
             .put("coinjoin", dump(app.getSharedPreferences(COINJOIN, Context.MODE_PRIVATE).all))
+            .put("scan", scanMemory(app))
             .toString()
+    }
+
+    /**
+     * What the wallet remembers from its last looks: the balances and movements it opens on,
+     * and each address's status with its history. A restored phone then opens on them and its
+     * first check reuses whatever did not change. Only a shortcut: every address is still
+     * asked about (see [Scanner]). The raw transactions are left out: they are fetched again.
+     */
+    private fun scanMemory(app: Context): JSONObject {
+        val o = JSONObject()
+        val snaps = JSONObject()
+        java.io.File(app.noBackupFilesDir, "snapshots").listFiles()?.filter { it.isFile && !it.name.endsWith(".tmp") }?.forEach { f ->
+            runCatching { snaps.put(f.name, f.readText()) }
+        }
+        o.put("snapshots", snaps)
+        runCatching { o.put("status", java.io.File(java.io.File(app.noBackupFilesDir, "scan-cache"), "status.json").readText()) }
+        return o
+    }
+
+    private fun restoreScanMemory(app: Context, o: JSONObject) {
+        val dir = java.io.File(app.noBackupFilesDir, "snapshots"); dir.mkdirs()
+        o.optJSONObject("snapshots")?.let { s ->
+            for (name in s.keys()) {
+                // Our own file names only: hex, no path.
+                if (!name.matches(Regex("[0-9a-f]{8,64}"))) continue
+                runCatching { java.io.File(dir, name).writeText(s.getString(name)) }
+            }
+        }
+        val cache = java.io.File(app.noBackupFilesDir, "scan-cache")
+        o.optString("status").takeIf { it.isNotEmpty() }?.let { st ->
+            runCatching { cache.mkdirs(); java.io.File(cache, "status.json").writeText(st) }
+        }
+        Scanner.reloadDisk(cache)
     }
 
     /** Puts back what [export] saved. Run before the wallet screen reads its settings. */
@@ -65,6 +100,7 @@ object AppBackup {
         val o = JSONObject(json)
         o.optJSONObject("store")?.let { Store.importPrefs(app.getSharedPreferences(STORE, Context.MODE_PRIVATE), load(it)) }
         o.optJSONObject("coinjoin")?.let { Store.importPrefs(app.getSharedPreferences(COINJOIN, Context.MODE_PRIVATE), load(it)) }
+        o.optJSONObject("scan")?.let { runCatching { restoreScanMemory(app, it) } }
         com.kilombino.pyblockwatch.coinjoin.CoinjoinHub.reload(app)
     }
 }

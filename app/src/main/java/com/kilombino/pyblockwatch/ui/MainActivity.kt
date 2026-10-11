@@ -986,6 +986,7 @@ internal fun SettingsPanel(
                 Switch(checked = cjNotify, onCheckedChange = { cjNotify = it; vm.setCoinjoinNotify(it); if (it) askNotif() },
                     colors = SwitchDefaults.colors(checkedThumbColor = accent))
             }
+            if (cjOn) { Spacer(Modifier.height(10.dp)); CoinjoinAutoSetting(accent) }
             Spacer(Modifier.height(14.dp))
             FullBackupPanel(vm, accent)
         }

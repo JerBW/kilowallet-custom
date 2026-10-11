@@ -414,6 +414,12 @@ class Scanner(
             }
         }
 
+        /** Read the remembered statuses again (a backup file just put them back). */
+        fun reloadDisk(dir: java.io.File): Unit = synchronized(this) {
+            statusCache.clear(); disk = null
+            useDisk(dir)
+        }
+
         /** Forget everything remembered (a wallet was forgotten or switched). */
         fun clearDisk(): Unit = synchronized(this) {
             statusCache.clear(); txCache.clear()

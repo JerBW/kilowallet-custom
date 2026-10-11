@@ -654,13 +654,19 @@ private fun MyPoolCard(
  */
 @Composable
 private fun AutoPanel(accent: Color) {
+    Panel(accent = accent) { CoinjoinAutoSetting(accent) }
+}
+
+/** The same choice, in settings and on the join and create sheets. */
+@Composable
+internal fun CoinjoinAutoSetting(accent: Color) {
     val ctx = LocalContext.current
     var on by remember { mutableStateOf(CoinjoinHub.autoDefault(ctx)) }
-    Panel(accent = accent) {
+    Column {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text("Run the round on its own", style = MaterialTheme.typography.bodyMedium, color = TextMain)
-                Explain(if (on) "One fingerprint now, nothing more: the wallet accepts closing, asks to close before the " +
+                Explain(if (on) "One fingerprint when you join or open a pool, nothing more: the wallet accepts closing, asks to close before the " +
                     "pool expires, and signs once it has checked that the transaction pays your exact output and your " +
                     "change. If anything is off it does not sign. The keys of these coins stay in memory only, until " +
                     "the round ends; if the phone closes the app, it asks you again."
@@ -669,6 +675,36 @@ private fun AutoPanel(accent: Color) {
             androidx.compose.material3.Switch(checked = on, onCheckedChange = { on = it; CoinjoinHub.setAutoDefault(ctx, it) },
                 colors = androidx.compose.material3.SwitchDefaults.colors(checkedThumbColor = accent))
         }
+        // A round on its own has to keep going with the screen off and the app closed; Android's
+        // battery saver may pause it otherwise. Offered here, never asked for elsewhere.
+        var free by remember { mutableStateOf(batteryFree(ctx)) }
+        val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current
+        androidx.compose.runtime.DisposableEffect(lifecycle) {
+            val o = androidx.lifecycle.LifecycleEventObserver { _, e -> if (e == androidx.lifecycle.Lifecycle.Event.ON_RESUME) free = batteryFree(ctx) }
+            lifecycle.lifecycle.addObserver(o); onDispose { lifecycle.lifecycle.removeObserver(o) }
+        }
+        if (!free) {
+            Spacer(Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Explain("Android may pause the wallet in the background and the round would wait for you. " +
+                    "Let it run, so you can put the phone away until it is done.", Modifier.weight(1f))
+                TextButton(onClick = { askBatteryFree(ctx) }) { Text("ALLOW", color = accent) }
+            }
+        }
+    }
+}
+
+private fun batteryFree(ctx: android.content.Context): Boolean =
+    (ctx.getSystemService(android.content.Context.POWER_SERVICE) as android.os.PowerManager).isIgnoringBatteryOptimizations(ctx.packageName)
+
+@android.annotation.SuppressLint("BatteryLife")
+private fun askBatteryFree(ctx: android.content.Context) {
+    runCatching {
+        ctx.startActivity(android.content.Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+            android.net.Uri.parse("package:" + ctx.packageName)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+    }.onFailure {
+        runCatching { ctx.startActivity(android.content.Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
     }
 }
 
