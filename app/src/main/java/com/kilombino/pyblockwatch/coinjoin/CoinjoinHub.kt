@@ -146,6 +146,16 @@ object CoinjoinHub {
     fun setAutoDefault(ctx: Context, on: Boolean) =
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean("cj_auto", on).apply()
 
+    /** Run a round already joined on its own from now: [keys] of its coins, one unlock. */
+    fun startAuto(poolId: String, keys: List<java.math.BigInteger>) {
+        val s = session(poolId) ?: return
+        s.autoKeys = keys
+        // Already asked to close, or waiting for a signature: answer now, through the same checks.
+        if (s.state.phase == PoolSession.Phase.VOTING && s.state.votedOn != s.state.voteId) runCatching { s.vote(true) }
+        if (s.state.phase == PoolSession.Phase.SIGNING && !s.state.postedSig) runCatching { s.sign(keys) }
+        _version.value++
+    }
+
     /** Stop running [poolId] on its own: its keys are dropped, and the next steps ask again. */
     fun stopAuto(poolId: String) { session(poolId)?.autoKeys = null; _version.value++ }
 

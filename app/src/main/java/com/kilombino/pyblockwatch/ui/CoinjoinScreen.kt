@@ -131,6 +131,8 @@ fun CoinjoinScreen(vm: WalletViewModel, accent: Color) {
     }
 
     TelegramAlertsPanel(accent, mine)
+    // How rounds run (on its own or asking), and room to run in the background, in sight.
+    AutoPanel(accent)
 
     message?.let { m ->
         Panel(accent = Warn) {
@@ -155,7 +157,6 @@ fun CoinjoinScreen(vm: WalletViewModel, accent: Color) {
                 label = { Text("pool password", style = MaterialTheme.typography.bodySmall) },
                 singleLine = true, textStyle = MaterialTheme.typography.bodyMedium, modifier = Modifier.fillMaxWidth())
         }
-        AutoPanel(accent)
         CoinPicker(vm, accent, "Join · ${groupSats(t.amount)} sats${poolKind(t)}", t.amount, t.feeRate, t.script, t.maxInputs,
             onCancel = { joining = null; joinPassword = "" },
             onPicked = { u ->
@@ -172,7 +173,6 @@ fun CoinjoinScreen(vm: WalletViewModel, accent: Color) {
         return
     }
     if (creating) {
-        AutoPanel(accent)
         CreatePool(vm, accent, testPools, onCancel = { creating = false }) { amount, rate, minPeers, peers, hours, password, maxInputs, u ->
             unlockAndPick(activity, vm, u, "Open a coinjoin pool", "Unlock to put your coins in",
                 onPick = { pick ->
@@ -241,8 +241,9 @@ fun CoinjoinScreen(vm: WalletViewModel, accent: Color) {
             "anyone can ask to close: the others accept or refuse; whoever does not answer in " +
             "${Protocol.VOTE_SECONDS / 60} minutes is left out. 4. Each wallet posts its mixed output with no name " +
             "on it, after a random wait. 5. Every wallet builds the same transaction, checks its own output and " +
-            "change, and you sign with your fingerprint. 6. Once all have signed it goes out — signed so it is " +
-            "valid only on this chain, never on the spamchain. Keep the app (or its notification) alive until then.")
+            "change, and signs: on its own if you chose so above (one fingerprint when joining), otherwise with " +
+            "your fingerprint. 6. Once all have signed it goes out — signed so it is valid only on this chain, " +
+            "never on the spamchain. Keep the app (or its notification) alive until then.")
     }
 }
 
@@ -542,6 +543,16 @@ private fun MyPoolCard(
             TextButton(onClick = { CoinjoinHub.stopAuto(st.poolId); onMessage("This round now asks you at each step.") }) {
                 Text("stop", color = TextSoft, style = MaterialTheme.typography.bodySmall)
             }
+        } else if (st.phase in setOf(PoolSession.Phase.OPEN, PoolSession.Phase.VOTING, PoolSession.Phase.CLOSING,
+                PoolSession.Phase.SIGNING) && !st.postedSig) {
+            // A round joined while asking (or before this existed): one fingerprint now, nothing later.
+            TextButton(onClick = {
+                runCatching { vm.seedDecryptCipher() }.onSuccess { cipher ->
+                    Biometric.authenticate(activity, "Run the round on its own", "Unlock once: the wallet accepts closing and signs after its checks", cipher,
+                        onSuccess = { authed -> act { CoinjoinHub.startAuto(st.poolId, vm.coinjoinKeys(authed, st.coinPaths)) } },
+                        onError = onMessage)
+                }.onFailure { onMessage(it.message ?: "could not unlock") }
+            }) { Text("let it run on its own", color = accent, style = MaterialTheme.typography.bodySmall) }
         }
         Spacer(Modifier.height(8.dp))
 
@@ -666,10 +677,8 @@ internal fun CoinjoinAutoSetting(accent: Color) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text("Run the round on its own", style = MaterialTheme.typography.bodyMedium, color = TextMain)
-                Explain(if (on) "One fingerprint when you join or open a pool, nothing more: the wallet accepts closing, asks to close before the " +
-                    "pool expires, and signs once it has checked that the transaction pays your exact output and your " +
-                    "change. If anything is off it does not sign. The keys of these coins stay in memory only, until " +
-                    "the round ends; if the phone closes the app, it asks you again."
+                Explain(if (on) "One fingerprint when you join; then it accepts closing and signs by itself, only " +
+                    "if the transaction pays your exact output and change. The keys stay in memory until the round ends."
                     else "Off: you accept closing and sign yourself, with your fingerprint, at each step.")
             }
             androidx.compose.material3.Switch(checked = on, onCheckedChange = { on = it; CoinjoinHub.setAutoDefault(ctx, it) },
@@ -686,8 +695,7 @@ internal fun CoinjoinAutoSetting(accent: Color) {
         if (!free) {
             Spacer(Modifier.height(8.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Explain("Android may pause the wallet in the background and the round would wait for you. " +
-                    "Let it run, so you can put the phone away until it is done.", Modifier.weight(1f))
+                Explain("Android may pause the wallet in the background. Let it run, so you can put the phone away.", Modifier.weight(1f))
                 TextButton(onClick = { askBatteryFree(ctx) }) { Text("ALLOW", color = accent) }
             }
         }
