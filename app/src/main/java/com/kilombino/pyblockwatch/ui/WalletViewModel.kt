@@ -1453,6 +1453,24 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
             com.kilombino.pyblockwatch.crypto.Bip32.derivePath(parsed, u.chainIndex, u.index).pubkey(), typeFor(u.type))
     }
 
+    private val addressCache = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    /** The address a coin of this wallet sits on (derived publicly, cached), or null if unknown. */
+    fun coinAddress(u: Scanner.SpendableUtxo): String? {
+        val xpub = xpubFor(u.type) ?: return null
+        val type = typeFor(u.type)
+        val key = "$xpub/${u.chainIndex}/${u.index}/$type"
+        addressCache[key]?.let { return it }
+        return runCatching {
+            com.kilombino.pyblockwatch.crypto.Address.encode(com.kilombino.pyblockwatch.crypto.Bip32.derivePath(
+                com.kilombino.pyblockwatch.crypto.Bip32.parseExtendedPubKey(xpub), u.chainIndex, u.index).pubkey(), type)
+        }.getOrNull()?.also { addressCache[key] = it }
+    }
+
+    /** The derivation path of a coin's address, e.g. m/86'/0'/0'/1/4. */
+    fun coinPath(u: Scanner.SpendableUtxo): String =
+        "m/${Scanner.purposeFor(typeFor(u.type))}'/0'/0'/${u.chainIndex}/${u.index}"
+
     /** Next unused index of [chainIndex] in the account [tag] picks (the one new addresses come from by default). */
     private fun nextUnused(chainIndex: Int, tag: ScriptType? = newTag): Int {
         val seen = _state.value.chains.values.flatMap { it.rows }.filter { it.chainIndex == chainIndex && it.type == tag }

@@ -760,7 +760,8 @@ fun SendSheet(vm: WalletViewModel, accent: Color, onClose: () -> Unit) {
                                     Text("${groupSats(u.value)} sats",
                                          color = if (sel) accent else TextMain,
                                          style = MaterialTheme.typography.bodyMedium)
-                                    Text("${u.txid.take(8)}…:${u.vout} · m/…/${u.chainIndex}/${u.index}" +
+                                    Text((vm.coinAddress(u)?.let { shortAddress(it) } ?: "${u.txid.take(8)}…:${u.vout}") +
+                                        " · m/…/${u.chainIndex}/${u.index}" +
                                         (if (u.height <= 0) " · 0 conf" else ""),
                                          color = TextFaint, style = MaterialTheme.typography.bodySmall)
                                 }

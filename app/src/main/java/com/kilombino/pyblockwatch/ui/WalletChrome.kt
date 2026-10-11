@@ -197,8 +197,18 @@ fun CoinsCard(state: UiState, vm: WalletViewModel, chain: Chain, accent: Color) 
     var open by remember { mutableStateOf<com.kilombino.pyblockwatch.data.Scanner.SpendableUtxo?>(null) }
     open?.let { u ->
         val conf = if (u.height <= 0 || cs.height <= 0) 0 else cs.height - u.height + 1
-        TxDetailDialog(u.txid, accent, vm.explorerFor(chain),
-            status = "output ${u.vout} · " + (if (conf == 0) "in mempool · 0 confirmations" else "$conf confirmation" + if (conf == 1) "" else "s"),
+        // A coin is looked at by its address: copy it, or open the address on the explorer.
+        val addr = vm.coinAddress(u)
+        val confText = if (conf == 0) "in mempool · 0 confirmations" else "$conf confirmation" + if (conf == 1) "" else "s"
+        if (addr != null) TxDetailDialog(addr, accent, vm.explorerFor(chain),
+            status = "${vm.coinPath(u)} · ${if (u.chainIndex == 0) "receive" else "change"} · $confText",
+            onSpeedUp = null, onClose = { open = null }, vm = vm, chain = chain, kind = "address",
+            extra = {
+                Text(street("${groupSats(u.value)} sats") + " · ${u.txid.take(8)}…:${u.vout}",
+                    style = MaterialTheme.typography.bodySmall, color = TextSoft)
+            })
+        else TxDetailDialog(u.txid, accent, vm.explorerFor(chain),
+            status = "output ${u.vout} · $confText",
             onSpeedUp = null, onClose = { open = null }, vm = vm, chain = chain)
     }
     Panel(accent = accent) {
@@ -210,7 +220,8 @@ fun CoinsCard(state: UiState, vm: WalletViewModel, chain: Chain, accent: Color) 
                 Column(Modifier.weight(1f)) {
                     Text(street("${groupSats(u.value)} ${if (chain == Chain.BLAKE2B) "sats" else "poolsats"}"),
                         style = MaterialTheme.typography.bodyMedium, color = TextMain)
-                    Text("${u.txid.take(8)}…:${u.vout}", style = MaterialTheme.typography.bodySmall, color = TextFaint)
+                    Text(vm.coinAddress(u)?.let { shortAddress(it) } ?: "${u.txid.take(8)}…:${u.vout}",
+                        style = MaterialTheme.typography.bodySmall, color = TextFaint)
                 }
                 Spacer(Modifier.width(8.dp))
                 Text(if (conf == 0) "0 conf" else "$conf conf" + if (conf >= 3) "  ✓" else "",
