@@ -207,6 +207,9 @@ fun SimpleScreen(state: UiState, vm: WalletViewModel, onToggleNotifications: (Bo
         state.chains[chain]?.refreshing?.let {
             Text("↻ refreshing · $it", style = MaterialTheme.typography.bodySmall, color = TextSoft)
         }
+        if (state.chains[chain]?.stale == true) Text(
+            if (state.chains[chain]?.refreshing != null) "Last known balance, checking it now…" else "Last known balance, not checked yet: pull down to try again.",
+            style = MaterialTheme.typography.bodySmall, color = Warn)
 
         SimpleBalance(chain, cs, state.market, state.fiat, accent, state.nextRefreshAt, onFiat = vm::setFiat)
 

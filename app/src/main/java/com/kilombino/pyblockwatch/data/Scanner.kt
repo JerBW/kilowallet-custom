@@ -126,12 +126,12 @@ class Scanner(
                     val scriptHash = Address.scriptHashFor(child.pubkey(), type)
                     val address = Address.encode(child.pubkey(), type)
 
-                    // History first, balance only when there IS history. Most addresses
-                    // in a scan are unused, and asking for a balance we already know is
-                    // zero doubles the round trips on the common path.
-                    val hist = client.history(scriptHash)
+                    // Every address is asked about, every time: one status call (a hash of its
+                    // whole history, null when unused). History and balance are fetched only
+                    // when that hash differs from the one remembered with them, so an address
+                    // that did not move costs one call and nothing is ever taken on trust.
+                    val (hist, bal) = lookup(client, endpoint, scriptHash)
                     val txs = hist.size
-                    val bal = if (txs > 0) client.balance(scriptHash) else ScriptHashBalance(0, 0)
 
                     val row = AddressRow(
                         chainIndex = chainIndex, index = index, address = address,
@@ -157,6 +157,7 @@ class Scanner(
                 TxConf(id, if (h <= 0) 0 else height - h + 1, pending = h <= 0, amount = a,
                     spv = if (h > 0 && a != null && a > 0 && height - h < SPV_WINDOW) spvCheck(client, id, h) else null)
             }.sortedWith(compareBy({ !it.pending }, { it.confirmations }))
+            saveDisk()
             emit(ScanEvent.Done(rows, height, txs))
         } catch (e: Exception) {
             emit(ScanEvent.Failed(e.message ?: "The scan failed"))
@@ -204,14 +205,9 @@ class Scanner(
             // since the last refresh (or were never seen). Most refreshes find nothing new,
             // so this halves the round trips, and an unused address costs a single call.
             val updated = rows.map { r ->
-                val key = endpoint.toString() + "|" + r.scriptHash
-                val status = client.status(r.scriptHash)
-                val known = statusCache[key]?.takeIf { it.status == status }
-                val entry = known ?: if (status == null) CachedAddress(null, emptyList(), ScriptHashBalance(0, 0))
-                    else CachedAddress(status, client.history(r.scriptHash), client.balance(r.scriptHash))
-                statusCache[key] = entry
-                entry.history.forEach { txHeights[it.txid] = it.height }
-                r.copy(confirmed = entry.balance.confirmed, unconfirmed = entry.balance.unconfirmed, txCount = entry.history.size)
+                val (hist, bal) = lookup(client, endpoint, r.scriptHash)
+                hist.forEach { txHeights[it.txid] = it.height }
+                r.copy(confirmed = bal.confirmed, unconfirmed = bal.unconfirmed, txCount = hist.size)
             }
             val amounts = netAmounts(client, txHeights.keys, rows.map { it.scriptHash }.toSet())
             val txs = txHeights.map { (id, h) ->
@@ -219,6 +215,7 @@ class Scanner(
                 TxConf(id, if (h <= 0) 0 else tip - h + 1, pending = h <= 0, amount = a,
                     spv = if (h > 0 && a != null && a > 0 && tip - h < SPV_WINDOW) spvCheck(client, id, h) else null)
             }.sortedWith(compareBy({ !it.pending }, { it.confirmations }))
+            saveDisk()
             Triple(updated, txs, tip)
         } finally {
             client.close()
@@ -232,11 +229,22 @@ class Scanner(
      * transaction never changes, so each is fetched once per app run and then kept; a
      * failure leaves that amount unknown rather than breaking the scan.
      */
+    /**
+     * History and balance of one address, from its status: what was remembered with the same
+     * status, or fresh from the server when the status changed or was never seen.
+     */
+    private fun lookup(client: ElectrumClient, endpoint: NodeEndpoint, scriptHash: String): Pair<List<ElectrumClient.HistoryItem>, ScriptHashBalance> {
+        val key = endpoint.toString() + "|" + scriptHash
+        val status = client.status(scriptHash)
+        if (status == null) { statusCache.remove(key); return emptyList<ElectrumClient.HistoryItem>() to ScriptHashBalance(0, 0) }
+        statusCache[key]?.takeIf { it.status == status }?.let { return it.history to it.balance }
+        val entry = CachedAddress(status, client.history(scriptHash), client.balance(scriptHash))
+        statusCache[key] = entry; cacheDirty = true
+        return entry.history to entry.balance
+    }
+
     private fun netAmounts(client: ElectrumClient, txids: Collection<String>, ours: Set<String>): Map<String, Long> {
-        val txs = txids.mapNotNull { id ->
-            txCache[id]?.let { id to it }
-                ?: runCatching { TxParse.parse(client.transaction(id)) }.getOrNull()?.also { txCache[id] = it }?.let { id to it }
-        }.toMap()
+        val txs = txids.mapNotNull { id -> tx(client, id)?.let { id to it } }.toMap()
         fun mine(o: TxParse.Out?) = o != null && Address.electrumScriptHash(o.scriptPubKey) in ours
         return txs.mapValues { (_, tx) ->
             tx.outputs.filter { mine(it) }.sumOf { it.value } -
@@ -284,8 +292,7 @@ class Scanner(
             val tip = runCatching { client.blockHeight() }.getOrNull() ?: return all
             all.filter { u ->
                 if (u.height <= 0 || tip - u.height + 1 >= LONG_MATURITY) return@filter true
-                val tx = txCache[u.txid] ?: runCatching { TxParse.parse(client.transaction(u.txid)) }.getOrNull()
-                    ?.also { txCache[u.txid] = it } ?: return@filter true
+                val tx = tx(client, u.txid) ?: return@filter true
                 val coinbase = tx.inputs.size == 1 && tx.inputs[0].txid.all { it == '0' } && tx.inputs[0].vout == -1
                 !coinbase || tip - u.height + 1 >= maturityFor(u.height)
             }
@@ -362,9 +369,71 @@ class Scanner(
         /** What an address looked like at its last status, so an unchanged one needs no more calls. */
         private class CachedAddress(val status: String?, val history: List<ElectrumClient.HistoryItem>, val balance: ScriptHashBalance)
         private val statusCache = java.util.concurrent.ConcurrentHashMap<String, CachedAddress>()
+        @Volatile private var cacheDirty = false
 
         /** Parsed wallet transactions by txid; a transaction never changes, so it is fetched once. */
         private val txCache = java.util.concurrent.ConcurrentHashMap<String, TxParse.Tx>()
+
+        /**
+         * Where the caches above survive the app being closed: the statuses with what was
+         * seen under them, and each raw transaction once (it never changes). Only ever a
+         * shortcut: a status is still asked for every address on every look, and anything
+         * unreadable here is simply fetched again.
+         */
+        @Volatile private var disk: java.io.File? = null
+
+        fun useDisk(dir: java.io.File): Unit = synchronized(this) {
+            if (disk != null) return
+            dir.mkdirs(); java.io.File(dir, "tx").mkdirs()
+            disk = dir
+            runCatching {
+                val o = org.json.JSONObject(java.io.File(dir, "status.json").readText())
+                for (k in o.keys()) {
+                    val e = o.getJSONObject(k)
+                    val h = e.getJSONArray("h")
+                    statusCache[k] = CachedAddress(e.getString("s"),
+                        (0 until h.length()).map { val x = h.getJSONArray(it); ElectrumClient.HistoryItem(x.getString(0), x.getInt(1)) },
+                        ScriptHashBalance(e.getLong("c"), e.getLong("u")))
+                }
+            }
+        }
+
+        private fun saveDisk(): Unit = synchronized(this) {
+            val dir = disk ?: return
+            if (!cacheDirty) return
+            runCatching {
+                val o = org.json.JSONObject()
+                for ((k, e) in statusCache) {
+                    if (e.status == null) continue
+                    val h = org.json.JSONArray(); e.history.forEach { h.put(org.json.JSONArray().put(it.txid).put(it.height)) }
+                    o.put(k, org.json.JSONObject().put("s", e.status).put("h", h).put("c", e.balance.confirmed).put("u", e.balance.unconfirmed))
+                }
+                val tmp = java.io.File(dir, "status.json.tmp"); tmp.writeText(o.toString())
+                tmp.renameTo(java.io.File(dir, "status.json"))
+                cacheDirty = false
+            }
+        }
+
+        /** Forget everything remembered (a wallet was forgotten or switched). */
+        fun clearDisk(): Unit = synchronized(this) {
+            statusCache.clear(); txCache.clear()
+            disk?.let { d -> java.io.File(d, "status.json").delete(); java.io.File(d, "tx").listFiles()?.forEach { it.delete() } }
+            Unit
+        }
+
+        /** A wallet transaction: from memory, from the phone, or from the server (then kept). */
+        private fun tx(client: ElectrumClient, txid: String): TxParse.Tx? {
+            txCache[txid]?.let { return it }
+            val file = disk?.let { java.io.File(java.io.File(it, "tx"), txid.filter { c -> c.isLetterOrDigit() }) }
+            val fromDisk = file?.takeIf { it.exists() }?.let { f -> runCatching { f.readText() }.getOrNull() }
+                ?.let { hex -> runCatching { TxParse.parse(hex) }.getOrNull()?.takeIf { TxParse.txid(it) == txid } }
+            if (fromDisk != null) { txCache[txid] = fromDisk; return fromDisk }
+            val hex = runCatching { client.transaction(txid) }.getOrNull() ?: return null
+            val parsed = runCatching { TxParse.parse(hex) }.getOrNull() ?: return null
+            txCache[txid] = parsed
+            if (file != null && TxParse.txid(parsed) == txid) runCatching { file.writeText(hex) }
+            return parsed
+        }
 
         /** The script type the xpub prefix implies (SLIP-132), or null for a plain xpub. */
         fun scriptTypeOf(xpub: String): ScriptType? =

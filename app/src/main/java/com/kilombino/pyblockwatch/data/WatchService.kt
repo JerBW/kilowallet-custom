@@ -53,6 +53,7 @@ class WatchService : Service() {
 
     private suspend fun loop() {
         val store = Store(this)
+        Scanner.useDisk(java.io.File(noBackupFilesDir, "scan-cache"))
         val scanner = Scanner()
         while (scope.isActive) {
             if (!store.notificationsEnabled || store.refreshBackgroundMinutes <= 0) { stopSelf(); return }

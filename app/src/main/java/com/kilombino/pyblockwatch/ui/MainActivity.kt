@@ -785,8 +785,9 @@ private fun ScanStatus(cs: ChainState, accent: Color, onRetry: () -> Unit) {
 
                 is ScanPhase.Complete -> Column {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        PulseDot(Good); Spacer(Modifier.width(10.dp))
-                        Text("scan complete", style = MaterialTheme.typography.bodyMedium, color = Good)
+                        PulseDot(if (cs.stale) Warn else Good); Spacer(Modifier.width(10.dp))
+                        Text(if (cs.stale) (if (cs.refreshing != null) "last known · checking every address again" else "last known · not checked yet")
+                             else "scan complete", style = MaterialTheme.typography.bodyMedium, color = if (cs.stale) Warn else Good)
                     }
                     cs.refreshing?.let {
                         Spacer(Modifier.height(4.dp))

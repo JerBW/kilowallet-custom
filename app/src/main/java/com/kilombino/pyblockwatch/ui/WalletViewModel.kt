@@ -129,6 +129,11 @@ data class ChainState(
     val transactions: List<TxConf> = emptyList(),
     /** What a background refresh (pull-down or the 30-second one) is checking now; null when idle. */
     val refreshing: String? = null,
+    /**
+     * The rows and movements are the last ones this phone saw (shown at once on opening),
+     * not yet checked against the server this run. Cleared by the first look that completes.
+     */
+    val stale: Boolean = false,
 ) {
     val confirmed: Long get() = rows.sumOf { it.confirmed }
     val unconfirmed: Long get() = rows.sumOf { it.unconfirmed }
@@ -224,6 +229,7 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
     val state: StateFlow<UiState> = _state.asStateFlow()
 
     init {
+        Scanner.useDisk(java.io.File(getApplication<Application>().noBackupFilesDir, "scan-cache"))
         val xpub = store.xpub
         // A hot wallet set to another address type in an older version: back to its own BIP84.
         if (seedVault.hasSeed() && store.activeWallet != Store.WATCH && store.scriptType != ScriptType.P2WPKH)
@@ -254,7 +260,7 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
                 store.coinjoinAsked = true; store.coinjoinEnabled = true; store.coinjoinNotify = true
             }
         }
-        if (xpub != null) scannableChains().forEach { scan(it) }
+        if (xpub != null) scannableChains().forEach { look(it) }
         startRefreshLoop()
         refreshMarket()
     }
@@ -351,8 +357,9 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
                     BalanceWatch.evaluate(store, notifier, chain, conf, unconf, doneTxs)
                 }
                 updateIf(xpub, chain) {
-                    it.copy(rows = rows, transactions = doneTxs, height = tip, phase = ScanPhase.Complete)
+                    it.copy(rows = rows, transactions = doneTxs, height = tip, phase = ScanPhase.Complete, stale = false)
                 }
+                saveSnapshot(chain)
             } } finally { updateIf(xpub, chain) { it.copy(refreshing = null) } }
         }
     }
@@ -517,6 +524,7 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun forget() {
         jobs.values.forEach(Job::cancel); jobs.clear()
+        clearSnapshots()
         val wasWatch = store.activeWallet == Store.WATCH
         store.clearWallet()
         if (!wasWatch) seedVault.clear()
@@ -547,7 +555,7 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
     fun consentBtc() {
         if (btcConsent) return
         btcConsent = true
-        scan(Chain.BLAKE2B)
+        look(Chain.BLAKE2B)
     }
 
     fun explorerFor(chain: Chain): String = store.explorer(chain)
@@ -659,7 +667,7 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
                             )
                             st.copy(
                                 phase = ScanPhase.Complete, rows = ev.rows,
-                                height = ev.height, transactions = ev.txs,
+                                height = ev.height, transactions = ev.txs, stale = false,
                             )
                         }
                         is ScanEvent.Failed -> st.copy(phase = ScanPhase.Error(ev.message))
@@ -667,8 +675,80 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
                             fingerprint = ev.fingerprint, fingerprintChanged = true)
                     }
                 }
+                if (ev is ScanEvent.Done) saveSnapshot(chain)
             }
         }
+    }
+
+    // ------------------------------------------------------------------ remembered looks
+
+    /**
+     * Open on what this phone saw last time, then check: the remembered rows and movements are
+     * shown at once (marked as not yet checked), and a silent look ([refresh]) walks every
+     * address again behind them, so nothing is ever skipped. Without a snapshot, a normal scan.
+     */
+    private fun look(chain: Chain) {
+        val cs = _state.value.chains[chain]
+        val shown = cs != null && cs.rows.isNotEmpty() && cs.phase is ScanPhase.Complete
+        if (shown || restoreSnapshot(chain)) refresh(chain) else scan(chain)
+    }
+
+    /** One file per wallet, chain and account set: another xpub or address type never reads it. */
+    private fun snapshotFile(chain: Chain): java.io.File? {
+        val xpub = _state.value.xpub ?: return null
+        val id = com.kilombino.pyblockwatch.crypto.Hashes.sha256(
+            "$xpub|${_state.value.scriptType}|${extraAccount()?.xpub ?: ""}|${chain.name}".toByteArray())
+            .joinToString("") { "%02x".format(it) }.take(24)
+        return java.io.File(java.io.File(getApplication<Application>().noBackupFilesDir, "snapshots"), id)
+    }
+
+    private fun saveSnapshot(chain: Chain) {
+        val f = snapshotFile(chain) ?: return
+        val cs = _state.value.chains[chain] ?: return
+        if (cs.phase !is ScanPhase.Complete || cs.stale) return
+        runCatching {
+            val rows = org.json.JSONArray()
+            cs.rows.forEach { r ->
+                rows.put(org.json.JSONObject().put("c", r.chainIndex).put("i", r.index).put("a", r.address).put("p", r.path)
+                    .put("s", r.scriptHash).put("cf", r.confirmed).put("u", r.unconfirmed).put("n", r.txCount)
+                    .put("t", r.type?.name ?: ""))
+            }
+            val txs = org.json.JSONArray()
+            cs.transactions.forEach { t ->
+                txs.put(org.json.JSONObject().put("id", t.txid).put("cf", t.confirmations).put("p", t.pending)
+                    .put("a", t.amount ?: org.json.JSONObject.NULL).put("v", t.spv ?: org.json.JSONObject.NULL))
+            }
+            f.parentFile?.mkdirs()
+            val tmp = java.io.File(f.path + ".tmp")
+            tmp.writeText(org.json.JSONObject().put("rows", rows).put("txs", txs).put("h", cs.height).toString())
+            tmp.renameTo(f)
+        }.onFailure { android.util.Log.w("Kilowallet", "snapshot not saved: $it") }
+    }
+
+    private fun restoreSnapshot(chain: Chain): Boolean {
+        val f = snapshotFile(chain)?.takeIf { it.exists() } ?: return false
+        val xpub = _state.value.xpub ?: return false
+        return runCatching {
+            val o = org.json.JSONObject(f.readText())
+            val ra = o.getJSONArray("rows"); val ta = o.getJSONArray("txs")
+            val rows = (0 until ra.length()).map { val r = ra.getJSONObject(it)
+                AddressRow(r.getInt("c"), r.getInt("i"), r.getString("a"), r.getString("p"), r.getString("s"),
+                    r.getLong("cf"), r.getLong("u"), r.getInt("n"), r.optString("t").takeIf { t -> t.isNotEmpty() }?.let { t -> ScriptType.valueOf(t) })
+            }
+            val txs = (0 until ta.length()).map { val t = ta.getJSONObject(it)
+                TxConf(t.getString("id"), t.getInt("cf"), t.getBoolean("p"),
+                    if (t.isNull("a")) null else t.getLong("a"), if (t.isNull("v")) null else t.getBoolean("v"))
+            }
+            if (rows.isEmpty()) return@runCatching false
+            updateIf(xpub, chain) { it.copy(phase = ScanPhase.Complete, rows = rows, transactions = txs, height = o.optInt("h"), stale = true) }
+            true
+        }.getOrDefault(false)
+    }
+
+    /** Forget what this phone remembers about past looks (a wallet is forgotten). */
+    private fun clearSnapshots() {
+        runCatching { java.io.File(getApplication<Application>().noBackupFilesDir, "snapshots").listFiles()?.forEach { it.delete() } }
+        Scanner.clearDisk()
     }
 
     // ------------------------------------------------------------------ hot wallet: create
@@ -845,7 +925,7 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
                 chains = Chain.entries.associateWith { ChainState() },
             )
         }
-        if (store.xpub != null) scannableChains().forEach { scan(it) }
+        if (store.xpub != null) scannableChains().forEach { look(it) }
     }
 
     // ------------------------------------------------------------------ sweep a private key
