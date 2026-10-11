@@ -1834,8 +1834,11 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
                 // the exact coin itself is of the pool's type.
                 val coins = exactCoinSources()
                 require(selected.none { coinScript(it).toList() in mixed }) { "A mixed output can't pay for it: that would undo the mix." }
+                // Every ticked coin goes in, as coin control says; with none ticked, the biggest
+                // first until they cover it.
                 val pick = mutableListOf<Scanner.SpendableUtxo>(); var sum = 0L
-                for (u in selected.ifEmpty { coins }) {
+                if (selected.isNotEmpty()) { pick += selected; sum = selected.sumOf { it.value } }
+                else for (u in coins) {
                     pick += u; sum += u.value
                     if (sum >= target + estimateFee(pick.size, listOf(ByteArray(34), ByteArray(34)), feeRate, taprootIn(pick))) break
                 }
