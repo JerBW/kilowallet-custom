@@ -139,6 +139,10 @@ dependencies {
     implementation("androidx.camera:camera-view:1.4.1")
     implementation("com.google.zxing:core:3.5.3")
 
+    // The Lightning node: LND (paulscode/lightning-fork with neutrino for BLAKE2b) built as a
+    // library with gomobile, pinned in lnd-engine/ENGINE. Not committed: build it as that file says.
+    implementation(files("libs/Lndmobile.aar"))
+
     // Biometric / device-credential gate for spending. This does NOT sign or hold keys — it
     // only unlocks the Android Keystore cipher that decrypts the seed (see SeedVault). The
     // signing itself stays in the pure-Kotlin crypto path.

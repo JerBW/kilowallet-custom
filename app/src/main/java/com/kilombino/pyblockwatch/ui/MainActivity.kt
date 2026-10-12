@@ -467,6 +467,7 @@ private fun WalletScreen(state: UiState, vm: WalletViewModel, onToggleNotificati
     // Tabs: BTC (the BLAKE2b chain) and ARK; the spamchain opens from settings.
     var arkTab by remember { mutableStateOf(false) }
     var cjTab by remember { mutableStateOf(false) }
+    var lnTab by remember { mutableStateOf(false) }
     var arkPull by remember { mutableStateOf(0) }
     val openTab by com.kilombino.pyblockwatch.data.OpenTab.flow.collectAsState()
     LaunchedEffect(openTab) {
@@ -559,11 +560,18 @@ private fun WalletScreen(state: UiState, vm: WalletViewModel, onToggleNotificati
         }
 
         // A watch-only wallet stays that: no Ark, no coinjoin (it cannot sign).
-        if (!state.isHot && (arkTab || cjTab)) { arkTab = false; cjTab = false }
-        AdvancedTabs(chain, arkTab, cjTab, state.isHot,
-            onBtc = { arkTab = false; cjTab = false; if (chain != Chain.BLAKE2B) vm.select(Chain.BLAKE2B) },
-            onArk = { arkTab = true; cjTab = false; showSend = false; showReceive = false },
-            onCoinjoin = { cjTab = true; arkTab = false; showSend = false; showReceive = false; if (chain != Chain.BLAKE2B) vm.select(Chain.BLAKE2B) })
+        if (!state.isHot && (arkTab || cjTab || lnTab)) { arkTab = false; cjTab = false; lnTab = false }
+        AdvancedTabs(chain, arkTab, cjTab, lnTab, state.isHot,
+            onBtc = { arkTab = false; cjTab = false; lnTab = false; if (chain != Chain.BLAKE2B) vm.select(Chain.BLAKE2B) },
+            onArk = { arkTab = true; cjTab = false; lnTab = false; showSend = false; showReceive = false },
+            onCoinjoin = { cjTab = true; arkTab = false; lnTab = false; showSend = false; showReceive = false; if (chain != Chain.BLAKE2B) vm.select(Chain.BLAKE2B) },
+            onLn = { lnTab = true; arkTab = false; cjTab = false; showSend = false; showReceive = false; if (chain != Chain.BLAKE2B) vm.select(Chain.BLAKE2B) })
+
+        if (lnTab) {
+            LightningScreen(vm, LnGold)
+            Spacer(Modifier.height(30.dp))
+            return@Column
+        }
 
         if (cjTab) {
             CoinjoinScreen(vm, Color(Chain.BLAKE2B.accent))
@@ -654,18 +662,19 @@ private fun WalletScreen(state: UiState, vm: WalletViewModel, onToggleNotificati
 
 /** BTC | ARK | COINJOIN, plus SPAMCOIN while the spamchain (opened from settings) is shown. */
 @Composable
-private fun AdvancedTabs(chain: Chain, arkTab: Boolean, cjTab: Boolean, hot: Boolean, onBtc: () -> Unit, onArk: () -> Unit, onCoinjoin: () -> Unit) {
+private fun AdvancedTabs(chain: Chain, arkTab: Boolean, cjTab: Boolean, lnTab: Boolean, hot: Boolean, onBtc: () -> Unit, onArk: () -> Unit, onCoinjoin: () -> Unit, onLn: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(PanelSoft).padding(4.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         val tabs = buildList {
-            add(Triple("BTC", !arkTab && !cjTab && chain == Chain.BLAKE2B, Color(Chain.BLAKE2B.accent)) to onBtc)
+            add(Triple("BTC", !arkTab && !cjTab && !lnTab && chain == Chain.BLAKE2B, Color(Chain.BLAKE2B.accent)) to onBtc)
             if (hot) {
                 add(Triple("ARK", arkTab, Purple) to onArk)
                 add(Triple("COINJOIN", cjTab, Good) to onCoinjoin)
+                add(Triple("LN", lnTab, LnGold) to onLn)
             }
-            if (!arkTab && !cjTab && chain == Chain.SHA256) add(Triple("SPAMCOIN", true, Color(Chain.SHA256.accent)) to {})
+            if (!arkTab && !cjTab && !lnTab && chain == Chain.SHA256) add(Triple("SPAMCOIN", true, Color(Chain.SHA256.accent)) to {})
         }
         tabs.forEach { (t, onClick) ->
             val (label, active, color) = t
@@ -675,7 +684,8 @@ private fun AdvancedTabs(chain: Chain, arkTab: Boolean, cjTab: Boolean, hot: Boo
                     .clickable(onClick = onClick).padding(vertical = 10.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Text(label, style = MaterialTheme.typography.titleMedium, color = if (active) color else TextFaint)
+                Text(label, style = if (tabs.size > 3) MaterialTheme.typography.titleSmall else MaterialTheme.typography.titleMedium,
+                    color = if (active) color else TextFaint, maxLines = 1)
             }
         }
     }

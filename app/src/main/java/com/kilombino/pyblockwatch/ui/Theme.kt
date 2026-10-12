@@ -20,6 +20,8 @@ val TextFaint = Color(0xFF6C5C86)
 val Purple = Color(0xFFB96BFF)
 val Orange = Color(0xFFF7931A)
 val Good = Color(0xFF34D399)
+/** Lightning (the LN tab). */
+val LnGold = Color(0xFF4DA3FF)
 val Warn = Color(0xFFFFC53D)
 val Bad = Color(0xFFFF5D5D)
 

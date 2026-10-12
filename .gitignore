@@ -15,3 +15,4 @@ keystore.properties
 
 # Ark engine builds (Rust); not committed until the build is reproducible
 app/src/main/jniLibs/
+/app/libs/*.aar
