@@ -47,7 +47,7 @@ import kotlinx.coroutines.withContext
  * client, self-custodial. Off until the user turns it on; beta, and it says so.
  */
 @Composable
-fun LightningScreen(vm: WalletViewModel, accent: Color) {
+fun LightningScreen(vm: WalletViewModel, accent: Color, settings: Boolean) {
     val activity = LocalContext.current as FragmentActivity
     val ctx = activity.applicationContext
     val ui by vm.state.collectAsState()
@@ -57,18 +57,9 @@ fun LightningScreen(vm: WalletViewModel, accent: Color) {
     LaunchedEffect(Unit) { Lightning.resume(ctx) }
     DisposableEffect(Unit) { Lightning.watch(true); onDispose { Lightning.watch(false) } }
 
-    // Restore, migrate and backups live behind ⚙: closed, the tab shows only the node.
-    var settings by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
-
+    // Restore, migrate and backups show with the app's own settings (the button by ⏻):
+    // closed, the tab shows only the node.
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            SectionLabel("⚡ Lightning · beta", accent)
-            Spacer(Modifier.weight(1f))
-            StreetEye(TextSoft)
-            TextButton(onClick = { settings = !settings }) {
-                Text(if (settings) "✕ close settings" else "⚙ settings", style = MaterialTheme.typography.bodySmall, color = if (settings) accent else TextSoft)
-            }
-        }
         when (val s = status) {
             is Lightning.Status.Off -> {
                 LnIntro(accent) { onError -> turnOn(activity, vm, onError) }
@@ -189,7 +180,8 @@ private fun LnIntro(accent: Color, onTurnOn: ((String) -> Unit) -> Unit) {
             androidx.compose.material3.Checkbox(checked = agreed, onCheckedChange = { agreed = it })
             Text("I understand, it is a beta", style = MaterialTheme.typography.bodySmall, color = TextMain)
         }
-        Button(onClick = { error = null; onTurnOn { error = it } }, enabled = agreed, modifier = Modifier.fillMaxWidth(),
+        if (Lnd.stoppedThisRun) Text("Close the app with ⏻ and open it again to turn Lightning on.", style = MaterialTheme.typography.bodySmall, color = Warn)
+        Button(onClick = { error = null; onTurnOn { error = it } }, enabled = agreed && !Lnd.stoppedThisRun, modifier = Modifier.fillMaxWidth(),
             colors = ButtonDefaults.buttonColors(containerColor = accent)) { Text("TURN ON LIGHTNING") }
         error?.let { Text(it, color = Bad, style = MaterialTheme.typography.bodySmall) }
     }
@@ -208,7 +200,9 @@ private fun LnNode(s: Lightning.Status.Running, accent: Color, settings: Boolean
             PulseDot(if (i.syncedChain) Good else Warn); Spacer(Modifier.width(8.dp))
             val sync = if (i.syncedChain) "Synced" else "Syncing"
             val h = if (s.tip > 0 && !i.syncedChain) "block ${groupSats(i.height.toLong())} of ${groupSats(s.tip.toLong())}" else "block ${groupSats(i.height.toLong())}"
-            Text("$sync · $h · ${i.peers} peer" + (if (i.peers == 1) "" else "s"), style = MaterialTheme.typography.bodySmall, color = TextSoft)
+            Text("$sync · $h · ${i.peers} peer" + (if (i.peers == 1) "" else "s"), style = MaterialTheme.typography.bodySmall,
+                color = TextSoft, modifier = Modifier.weight(1f))
+            StreetEye(TextSoft)
         }
         Spacer(Modifier.height(10.dp))
         Text(street("${groupSats(b?.channels ?: 0)} sats"), style = MaterialTheme.typography.headlineSmall, color = accent)
@@ -265,6 +259,7 @@ private fun LnNode(s: Lightning.Status.Running, accent: Color, settings: Boolean
         SaveChannelBackup(accent)
         RestoreChannelsLive(accent)
         MoveOut(accent)
+        DeleteEmptyNode(accent, s)
     }
 
     Panel(accent = Warn) {
@@ -627,7 +622,9 @@ private fun MoveIn(accent: Color) {
         Explain("If the old phone saved its node with MOVE TO ANOTHER PHONE, load that file here: the node starts with its channels open, as they were.")
         if (Lightning.movedAway(ctx)) Text("This phone's own node was moved out. Turn Lightning on here again only if the other phone no longer runs it.",
             style = MaterialTheme.typography.bodySmall, color = Warn)
-        if (file == null) TextButton(onClick = { open.launch(arrayOf("*/*")) }) { Text("MOVE IN FROM ANOTHER PHONE", color = accent) }
+        if (Lnd.stoppedThisRun) Text("Close the app with ⏻ and open it again first: the old node has to let go of its files.",
+            style = MaterialTheme.typography.bodySmall, color = Warn)
+        else if (file == null) TextButton(onClick = { open.launch(arrayOf("*/*")) }) { Text("MOVE IN FROM ANOTHER PHONE", color = accent) }
         else {
             PasswordFields(pw, null, { pw = it }, null)
             TextButton(enabled = pw.isNotEmpty(), onClick = {
@@ -681,4 +678,35 @@ private fun RestoreChannelsLive(accent: Color) {
             },
             dismissButton = { TextButton(onClick = { file = null }) { Text("CANCEL") } })
     }
+}
+
+/**
+ * An empty node (no channels, nothing on-chain) can be deleted, so another phone's node can
+ * be moved in here. One that holds money cannot: close the channels and send the coins out first.
+ */
+@Composable
+private fun DeleteEmptyNode(accent: Color, s: Lightning.Status.Running) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var ask by remember { mutableStateOf(false) }
+    val b = s.balances
+    val empty = s.channels.isEmpty() && s.pending.isEmpty() && b != null &&
+        b.onchainConfirmed == 0L && b.onchainUnconfirmed == 0L && b.channels == 0L && b.pendingOpen == 0L
+    Panel(accent = accent) {
+        SectionLabel("Delete this node", accent)
+        Spacer(Modifier.height(6.dp))
+        Explain(if (empty) "This node holds nothing. Delete it to move another phone's node in here (MIGRATE TO THIS PHONE, then shown with Lightning off)."
+                else "Only an empty node can be deleted: close its channels and send its on-chain coins out (PAY → on-chain) first.")
+        TextButton(enabled = empty, onClick = { ask = true }) { Text("DELETE THIS NODE", color = if (empty) Warn else TextFaint) }
+    }
+    if (ask) AlertDialog(onDismissRequest = { ask = false },
+        title = { Text("Delete this Lightning node?") },
+        text = { Text("It holds no money. Turning Lightning on again later makes a new node from your words.", style = MaterialTheme.typography.bodySmall) },
+        confirmButton = {
+            TextButton(onClick = {
+                ask = false
+                scope.launch { withContext(Dispatchers.IO) { Lightning.deleteNode(ctx) } }
+            }) { Text("DELETE", color = Warn) }
+        },
+        dismissButton = { TextButton(onClick = { ask = false }) { Text("CANCEL") } })
 }

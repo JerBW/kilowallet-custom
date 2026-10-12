@@ -115,10 +115,14 @@ object Lnd {
             ?.substringAfter("[ERR] ")?.substringAfter(": ")
     }.getOrNull()
 
+    /** LND was stopped in this process: it cannot be started again until the app restarts. */
+    @Volatile var stoppedThisRun = false
+        private set
+
     suspend fun stop() {
         if (!running) return
         runCatching { call { Lndmobile.stopDaemon(ByteArray(0), it) } }
-        running = false
+        running = false; stoppedThisRun = true
     }
 
     /** One unary call: [f] gets the callback to hand to Lndmobile. */

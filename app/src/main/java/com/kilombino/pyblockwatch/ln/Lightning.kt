@@ -92,6 +92,17 @@ object Lightning {
 
     fun markOff() { _status.value = Status.Off }
 
+    /** Stops and deletes an empty node (the screen checks it holds nothing). */
+    suspend fun deleteNode(ctx: Context) {
+        val app = ctx.applicationContext
+        watch(false)
+        Lnd.stop()
+        kotlinx.coroutines.delay(6_000)
+        Lnd.dir(app).deleteRecursively()
+        app.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean("enabled", false).apply()
+        markOff()
+    }
+
     fun enabled(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean("enabled", false)
 
     fun peers(ctx: Context): List<String> =

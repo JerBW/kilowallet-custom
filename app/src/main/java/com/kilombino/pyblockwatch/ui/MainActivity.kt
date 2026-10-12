@@ -568,7 +568,7 @@ private fun WalletScreen(state: UiState, vm: WalletViewModel, onToggleNotificati
             onLn = { lnTab = true; arkTab = false; cjTab = false; showSend = false; showReceive = false; if (chain != Chain.BLAKE2B) vm.select(Chain.BLAKE2B) })
 
         if (lnTab) {
-            LightningScreen(vm, LnGold)
+            LightningScreen(vm, LnGold, showSettings)
             Spacer(Modifier.height(30.dp))
             return@Column
         }
