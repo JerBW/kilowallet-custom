@@ -73,6 +73,8 @@ object Lightning {
                 }
             }
             app.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean("enabled", true).apply()
+        } catch (e: Exception) {
+            _status.value = Status.Failed(e.message ?: "Lightning did not start"); throw e
         } finally { bip39Seed.fill(0) }
     }
 
@@ -101,16 +103,32 @@ object Lightning {
         // The wallet RPC comes first; the main RPC once the wallet is open.
         var state = Lnd.state()
         repeat(30) { if (state == Lnd.WalletState.UNKNOWN || state == Lnd.WalletState.WAITING_TO_START) { delay(1000); state = Lnd.state() } }
+        if (state == Lnd.WalletState.UNKNOWN) {
+            Lnd.markStopped()
+            throw LndError("The node stopped: " + (Lnd.lastError(app) ?: "no answer from it"))
+        }
         onState(state)
         if (state == Lnd.WalletState.LOCKED) {
             _status.value = Status.Starting("opening the Lightning wallet")
             Lnd.unlock(LnSeed.password(app))
         }
-        repeat(60) { if (Lnd.state() != Lnd.WalletState.SERVER_ACTIVE) delay(1000) }
-        // Best effort: the watchtower (onion, needs Tor) and a link to Kilombino's node.
-        if (tor != null) runCatching { Lnd.addTower(TOWER, TOWER_HOST) }
-        runCatching { Lnd.connect(KILOMBINO_NODE, KILOMBINO_HOST) }
+        torOn = tor != null; linked = false; towerAdded = false
+        _status.value = Status.Starting("catching up with the chain")
         refresh()
+    }
+
+    @Volatile private var torOn = false
+    @Volatile private var linked = false
+    @Volatile private var towerAdded = false
+
+    /**
+     * Once the node answers (its RPC only does after the chain backend has caught up), best
+     * effort: the watchtower (onion, needs Tor) and a link to Kilombino's node. Retried on
+     * each refresh until they take.
+     */
+    private suspend fun link() {
+        if (torOn && !towerAdded) runCatching { Lnd.addTower(TOWER, TOWER_HOST) }.onSuccess { towerAdded = true }
+        if (!linked) runCatching { Lnd.connect(KILOMBINO_NODE, KILOMBINO_HOST) }.onSuccess { linked = true }
     }
 
     /** Re-reads everything the screen shows. */
@@ -118,11 +136,12 @@ object Lightning {
         if (!Lnd.running) return
         runCatching {
             val info = Lnd.info()
+            link()
             val b = runCatching { Lnd.balances() }.getOrNull()
             val ch = runCatching { Lnd.channels() }.getOrDefault(emptyList())
             val p = runCatching { Lnd.pendingOpen() }.getOrDefault(emptyList())
             _status.value = Status.Running(info, b, ch, p, chainTip)
-        }.onFailure { if (_status.value !is Status.Running) _status.value = Status.Starting("syncing") }
+        }.onFailure { if (_status.value !is Status.Running) _status.value = Status.Starting("catching up with the chain") }
     }
 
     /** Refreshes every few seconds while the LN tab is on screen. */

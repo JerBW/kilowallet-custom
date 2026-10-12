@@ -104,7 +104,7 @@ private fun LnIntro(accent: Color, onTurnOn: ((String) -> Unit) -> Unit) {
     Panel(accent = accent) {
         SectionLabel("Lightning · beta", accent)
         Spacer(Modifier.height(8.dp))
-        Text("Your own Lightning node, on this phone", style = MaterialTheme.typography.titleMedium)
+        Text("Your own Lightning node, on this phone", style = MaterialTheme.typography.titleMedium, color = TextMain)
         Spacer(Modifier.height(6.dp))
         Explain("It runs LND for the BLAKE2b chain with neutrino: it follows the chain itself from compact block filters, checks the proof of work, and keeps the channels and their keys here. Nobody holds your money. The keys come from your recovery words.")
     }
@@ -123,7 +123,7 @@ private fun LnIntro(accent: Color, onTurnOn: ((String) -> Unit) -> Unit) {
         Spacer(Modifier.height(8.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             androidx.compose.material3.Checkbox(checked = agreed, onCheckedChange = { agreed = it })
-            Text("I understand, it is a beta", style = MaterialTheme.typography.bodySmall)
+            Text("I understand, it is a beta", style = MaterialTheme.typography.bodySmall, color = TextMain)
         }
         Button(onClick = { error = null; onTurnOn { error = it } }, enabled = agreed, modifier = Modifier.fillMaxWidth(),
             colors = ButtonDefaults.buttonColors(containerColor = accent)) { Text("TURN ON LIGHTNING") }
@@ -160,7 +160,7 @@ private fun LnNode(s: Lightning.Status.Running, accent: Color) {
             Button(onClick = { sheet = if (sheet == v) LnSheet.None else v }, modifier = Modifier.weight(1f),
                 colors = ButtonDefaults.buttonColors(containerColor = if (sheet == v) accent else accent.copy(alpha = 0.25f)),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp, vertical = 8.dp)) {
-                Text(t, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                Text(t, style = MaterialTheme.typography.labelSmall, maxLines = 1, color = if (sheet == v) Ink else TextMain)
             }
         }
     }
@@ -177,14 +177,14 @@ private fun LnNode(s: Lightning.Status.Running, accent: Color) {
         SectionLabel("Channels", accent)
         s.pending.forEach { p ->
             Spacer(Modifier.height(6.dp))
-            Text(p.peer.take(16) + "…  " + street(groupSats(p.capacity)) + " sats", style = MaterialTheme.typography.bodySmall)
+            Text(p.peer.take(16) + "…  " + street(groupSats(p.capacity)) + " sats", style = MaterialTheme.typography.bodySmall, color = TextMain)
             Text("opening" + (if (p.confirmationsLeft > 0) " · ${p.confirmationsLeft} confirmations left" else " · waiting for the first confirmation"),
                 style = MaterialTheme.typography.bodySmall, color = Warn)
         }
         s.channels.forEach { c ->
             Spacer(Modifier.height(6.dp))
             val name = c.peerAlias.ifBlank { c.peer.take(16) + "…" }
-            Text(name + "  " + street(groupSats(c.capacity)) + " sats", style = MaterialTheme.typography.bodySmall)
+            Text(name + "  " + street(groupSats(c.capacity)) + " sats", style = MaterialTheme.typography.bodySmall, color = TextMain)
             Text((if (c.active) "active" else "offline") + " · yours " + street(groupSats(c.local)) + " · can receive " + street(groupSats(c.remote)),
                 style = MaterialTheme.typography.bodySmall, color = if (c.active) TextSoft else Warn)
         }
@@ -211,7 +211,7 @@ private fun FundSheet(accent: Color) {
         addr?.let { a ->
             Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) { QrImage("bitcoin:$a", 200) }
             Spacer(Modifier.height(6.dp))
-            Text(a, style = MaterialTheme.typography.bodySmall)
+            Text(a, style = MaterialTheme.typography.bodySmall, color = TextMain)
             TextButton(onClick = { clip.setText(AnnotatedString(a)) }) { Text("COPY", color = accent) }
         }
         err?.let { Text(it, color = Bad, style = MaterialTheme.typography.bodySmall) }
@@ -233,9 +233,9 @@ private fun OpenSheet(accent: Color, onchain: Long, onDone: () -> Unit) {
         Explain("A channel locks some of the node's on-chain coins with one peer; what you pay goes out through it. Kilombino's node is suggested because it is well connected on this chain; any node works.")
         Spacer(Modifier.height(6.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
-            androidx.compose.material3.RadioButton(selected = !custom, onClick = { custom = false }); Text("Kilombino", style = MaterialTheme.typography.bodySmall)
+            androidx.compose.material3.RadioButton(selected = !custom, onClick = { custom = false }); Text("Kilombino", style = MaterialTheme.typography.bodySmall, color = TextMain)
             Spacer(Modifier.width(12.dp))
-            androidx.compose.material3.RadioButton(selected = custom, onClick = { custom = true }); Text("Another node", style = MaterialTheme.typography.bodySmall)
+            androidx.compose.material3.RadioButton(selected = custom, onClick = { custom = true }); Text("Another node", style = MaterialTheme.typography.bodySmall, color = TextMain)
         }
         if (custom) OutlinedTextField(node, { node = it.trim() }, label = { Text("pubkey@host:port") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(amount, { amount = it.filter(Char::isDigit) }, label = { Text("Sats (available ${groupSats(onchain)})") }, singleLine = true,

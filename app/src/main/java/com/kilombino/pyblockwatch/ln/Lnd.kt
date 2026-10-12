@@ -48,8 +48,13 @@ object Lnd {
             appendLine("debuglevel=info")
             appendLine("nolisten=true")
             appendLine("norest=true")
+            // The TLS certificate would list every interface's address, and Android does not let
+            // apps read them (netlink): LND then stops at start. Only localhost talks to it here.
+            appendLine("tlsdisableautofill=true")
             appendLine("alias=$alias")
             appendLine("maxpendingchannels=3")
+            // Lightning DNS seeds list nodes of the SHA256d chain; peers here are chosen by hand.
+            appendLine("nobootstrap=true")
             // Channels up to 0.5 BTC can be opened to this wallet.
             appendLine("maxchansize=50000000")
             appendLine("[Bitcoin]")
@@ -57,7 +62,8 @@ object Lnd {
             appendLine("bitcoin.node=neutrino")
             appendLine("[neutrino]")
             peers.forEach { appendLine("neutrino.connect=$it") }
-            appendLine("neutrino.maxpeers=4")
+            // Room for every peer given: with fewer slots it drops and redials one every few seconds.
+            appendLine("neutrino.maxpeers=${maxOf(4, peers.size + 2)}")
             appendLine("[fee]")
             appendLine("fee.url=$FEE_URL")
             appendLine("[protocol]")
@@ -85,6 +91,15 @@ object Lnd {
             })
         }
     }
+
+    /** The node stopped on its own (it logs why): the next [start] starts it again. */
+    fun markStopped() { running = false }
+
+    /** The last error LND logged, to show when it does not come up. */
+    fun lastError(ctx: Context): String? = runCatching {
+        File(dir(ctx), "logs/bitcoin/mainnet/lnd.log").readLines().lastOrNull { "[ERR]" in it }
+            ?.substringAfter("[ERR] ")?.substringAfter(": ")
+    }.getOrNull()
 
     suspend fun stop() {
         if (!running) return
@@ -123,7 +138,7 @@ object Lnd {
 
     /**
      * Creates the node's wallet from [xprv], the Lightning master key worked out from the
-     * recovery words ([LnKeys.lightningMasterXprv]), encrypted on disk with [password].
+     * recovery words ([LnSeed.masterXprv]), encrypted on disk with [password].
      * [birthday] (unix seconds) lets the first scan start late instead of at genesis.
      */
     suspend fun initWallet(password: ByteArray, xprv: String, birthday: Long) {
