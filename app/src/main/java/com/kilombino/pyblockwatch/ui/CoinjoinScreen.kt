@@ -141,10 +141,13 @@ fun CoinjoinScreen(vm: WalletViewModel, accent: Color) {
         }
     }
 
-    // ---- our pools
-    if (mine.isNotEmpty()) {
+    // ---- our pools: the ones still going up here; the finished ones fold away at the bottom
+    val finishedPhases = setOf(PoolSession.Phase.CONFIRMED, PoolSession.Phase.ABORTED, PoolSession.Phase.REJECTED)
+    val active = mine.filter { it.phase !in finishedPhases }
+    val finished = mine.filter { it.phase in finishedPhases }
+    if (active.isNotEmpty()) {
         SectionLabel("Your pools", accent)
-        mine.forEach { st -> MyPoolCard(vm, st, rev, accent, activity) { message = it } }
+        active.forEach { st -> MyPoolCard(vm, st, rev, accent, activity) { message = it } }
     }
 
     // ---- join / create sheets
@@ -230,6 +233,21 @@ fun CoinjoinScreen(vm: WalletViewModel, accent: Color) {
                 ) { Text("JOIN") }
             }
         }
+    }
+
+    if (finished.isNotEmpty()) {
+        var open by remember { mutableStateOf(false) }
+        Row(Modifier.fillMaxWidth().clickable { open = !open }.padding(vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            SectionLabel("Finished pools (${finished.size})", accent)
+            Spacer(Modifier.weight(1f))
+            if (open) TextButton(onClick = { finished.forEach { CoinjoinHub.remove(ctx, it.poolId) } }) {
+                Text("remove all", color = TextFaint, style = MaterialTheme.typography.bodySmall)
+            }
+            Text(if (open) "▾" else "▸", color = TextSoft)
+        }
+        if (open) finished.forEach { st -> MyPoolCard(vm, st, rev, accent, activity) { message = it } }
+        else Explain("Confirmed and cancelled rounds. They go away by themselves after a week.")
     }
 
     Panel(accent = accent) {
