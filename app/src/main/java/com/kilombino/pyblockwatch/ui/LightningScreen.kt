@@ -114,7 +114,7 @@ private fun LnIntro(accent: Color, onTurnOn: ((String) -> Unit) -> Unit) {
         listOf(
             "BETA. Put in only what you can afford to lose.",
             "NEVER run Lightning with these words on two phones or profiles at once. Two nodes with the same keys break the channels and can lose their money. (Ark can be copied back; Lightning cannot.)",
-            "The recovery words bring back the on-chain coins of the node, but not the channels on their own. The channels need the channel backup too: keep it with your backup file.",
+            "The recovery words bring back the node's on-chain coins, but not the channels on their own. The backup file (Settings) carries the channel backup: save a new one after you open or close a channel. With it, a new phone asks each peer to close the channels and gets the money back on-chain.",
             "To receive, the phone must be online with the app open. Paying needs a channel with enough balance.",
             "Opening and closing a channel are on-chain transactions with their fees.",
             "A watchtower (Kilombino's, through Tor) watches your channels while the phone is off.",
@@ -256,7 +256,7 @@ private fun OpenSheet(accent: Color, onchain: Long, onDone: () -> Unit) {
                             if (host.isNotEmpty()) Lnd.connect(pk, host)
                             Lnd.openChannel(pk, amount.toLong(), (fee.toLongOrNull() ?: 2).coerceAtLeast(1))
                         }
-                    }.onSuccess { msg = "Opening. Funding transaction ${it.take(16)}…; usable after 3 confirmations." to true; Lightning.refresh() }
+                    }.onSuccess { msg = "Opening. Funding transaction ${it.take(16)}…; usable after 3 confirmations. Save a new backup file (Settings) so it includes this channel." to true; Lightning.refresh() }
                      .onFailure { msg = (it.message ?: "could not open the channel") to false }
                     busy = false
                 }

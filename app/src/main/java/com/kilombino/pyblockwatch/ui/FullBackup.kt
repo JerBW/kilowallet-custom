@@ -113,7 +113,7 @@ fun FullBackupPanel(vm: WalletViewModel, accent: Color) {
 
     Text("Backup file", style = MaterialTheme.typography.bodyMedium, color = TextMain)
     Explain("Everything in one file: your words, settings, nodes, contacts, coinjoin rounds and, if " +
-        "you use it, your Ark wallet with its on-chain coins and emergency exits. On a new phone, " +
+        "you use them, your Ark wallet (with its on-chain coins and emergency exits) and your Lightning channel backup. On a new phone, " +
         "\"Restore from a backup file\" brings it all back as it was. Save a new one after big changes.")
     message?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = if (it.startsWith("Error")) Bad else Good) }
     Button(onClick = { message = null; askPassword = true },

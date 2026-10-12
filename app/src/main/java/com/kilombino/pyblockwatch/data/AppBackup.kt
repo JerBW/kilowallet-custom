@@ -58,6 +58,7 @@ object AppBackup {
             .put("store", dump(app.getSharedPreferences(STORE, Context.MODE_PRIVATE).all))
             .put("coinjoin", dump(app.getSharedPreferences(COINJOIN, Context.MODE_PRIVATE).all))
             .put("scan", scanMemory(app))
+            .apply { com.kilombino.pyblockwatch.ln.Lightning.exportBackup(app)?.let { put("lightning", it) } }
             .toString()
     }
 
@@ -101,6 +102,7 @@ object AppBackup {
         o.optJSONObject("store")?.let { Store.importPrefs(app.getSharedPreferences(STORE, Context.MODE_PRIVATE), load(it)) }
         o.optJSONObject("coinjoin")?.let { Store.importPrefs(app.getSharedPreferences(COINJOIN, Context.MODE_PRIVATE), load(it)) }
         o.optJSONObject("scan")?.let { runCatching { restoreScanMemory(app, it) } }
+        o.optJSONObject("lightning")?.let { runCatching { com.kilombino.pyblockwatch.ln.Lightning.stageRestore(app, it) } }
         com.kilombino.pyblockwatch.coinjoin.CoinjoinHub.reload(app)
     }
 }

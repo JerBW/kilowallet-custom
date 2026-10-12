@@ -1,6 +1,7 @@
 package com.kilombino.pyblockwatch.ln
 
 import android.content.Context
+import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -28,6 +29,36 @@ object Lightning {
     const val TOWER_HOST = "b44c2u3dar4fdhb4m4vsp3v6kzohh2cqrggk2io74v4olr4nn5nytyad.onion:9911"
 
     private const val PREFS = "lightning"
+    /** 2026-09-01 00:00 UTC, around the BLAKE2b activation (block 961640): no node of these words is older. */
+    private const val ACTIVATION_TIME = 1788220800L
+    /** A channel backup from a restored backup file, handed to the node when its wallet is made. */
+    private const val RESTORE_SCB = "lnd-restore.backup"
+
+    /**
+     * What the backup file keeps of Lightning: the wallet's birthday and the static channel
+     * backup (LND keeps it current in channel.backup, encrypted with the node's keys). With it
+     * and the words, a new phone can ask each peer to close the channels and get the money back.
+     */
+    fun exportBackup(ctx: Context): org.json.JSONObject? {
+        val prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val birthday = prefs.getLong("birthday", 0L)
+        if (birthday == 0L) return null
+        val o = org.json.JSONObject().put("birthday", birthday)
+        File(Lnd.dir(ctx), "data/chain/bitcoin/mainnet/channel.backup").takeIf { it.exists() }?.let {
+            o.put("scb", android.util.Base64.encodeToString(it.readBytes(), android.util.Base64.NO_WRAP))
+        }
+        return o
+    }
+
+    /** Keeps what [exportBackup] saved for the next time Lightning is turned on here. */
+    fun stageRestore(ctx: Context, o: org.json.JSONObject) {
+        o.optLong("birthday").takeIf { it > 0 }?.let {
+            ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putLong("birthday", it).apply()
+        }
+        o.optString("scb").takeIf { it.isNotEmpty() }?.let {
+            File(ctx.noBackupFilesDir, RESTORE_SCB).writeBytes(android.util.Base64.decode(it, android.util.Base64.NO_WRAP))
+        }
+    }
 
     sealed class Status {
         object Off : Status()
@@ -68,8 +99,15 @@ object Lightning {
             bringUp(app) { state ->
                 if (state == Lnd.WalletState.NON_EXISTING) {
                     _status.value = Status.Starting("creating the Lightning wallet")
-                    val birthday = System.currentTimeMillis() / 1000 - 86400
-                    Lnd.initWallet(LnSeed.password(app), LnSeed.masterXprv(bip39Seed), birthday)
+                    val prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                    // The same words may have run a node before (another phone, a reinstall):
+                    // without a birthday from a backup file, the wallet looks from the chain's
+                    // activation, so no coin of that node is missed.
+                    val birthday = prefs.getLong("birthday", 0L).takeIf { it > 0 } ?: ACTIVATION_TIME
+                    val scb = File(app.noBackupFilesDir, RESTORE_SCB).takeIf { it.exists() }?.readBytes()
+                    Lnd.initWallet(LnSeed.password(app), LnSeed.masterXprv(bip39Seed), birthday, scb)
+                    prefs.edit().putLong("birthday", birthday).apply()
+                    File(app.noBackupFilesDir, RESTORE_SCB).delete()
                 }
             }
             app.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean("enabled", true).apply()

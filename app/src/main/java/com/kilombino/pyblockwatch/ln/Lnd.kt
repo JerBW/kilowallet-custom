@@ -141,10 +141,11 @@ object Lnd {
      * recovery words ([LnSeed.masterXprv]), encrypted on disk with [password].
      * [birthday] (unix seconds) lets the first scan start late instead of at genesis.
      */
-    suspend fun initWallet(password: ByteArray, xprv: String, birthday: Long) {
-        call {
-            Lndmobile.initWallet(Pb().bytes(1, password).string(7, xprv).int(8, birthday).int(4, 2500).build(), it)
-        }
+    suspend fun initWallet(password: ByteArray, xprv: String, birthday: Long, channelBackup: ByteArray? = null) {
+        val req = Pb().bytes(1, password).string(7, xprv).int(8, birthday).int(4, 2500)
+        // channel_backups (5): ChanBackupSnapshot.multi_chan_backup (2).multi_chan_backup (2).
+        if (channelBackup != null) req.msg(5, Pb().msg(2, Pb().bytes(2, channelBackup)))
+        call { Lndmobile.initWallet(req.build(), it) }
     }
 
     suspend fun unlock(password: ByteArray) {
