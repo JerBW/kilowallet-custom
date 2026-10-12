@@ -308,8 +308,10 @@ private fun PayLn(accent: Color, onDone: () -> Unit) {
     var msg by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
     Panel(accent = accent) {
         SectionLabel("Pay", accent)
+        val clip = LocalClipboardManager.current
         OutlinedTextField(text, { text = it.trim(); req = null; msg = null }, label = { Text("Lightning invoice (lnbc…)") },
             modifier = Modifier.fillMaxWidth(), maxLines = 4)
+        TextButton(onClick = { clip.getText()?.text?.trim()?.let { text = it; req = null; msg = null } }) { Text("PASTE", color = accent) }
         Button(enabled = text.length > 20 && !busy, modifier = Modifier.fillMaxWidth(),
             colors = ButtonDefaults.buttonColors(containerColor = accent), onClick = {
                 scope.launch {
