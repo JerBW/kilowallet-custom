@@ -236,6 +236,24 @@ object Lnd {
             Pending(ch.string(1), ch.string(2), ch.long(3), ch.long(4), p.int(7))
         }
 
+    /** A channel being closed: [note] says how far (waiting for the close, or locked until a block). */
+    data class Closing(val peer: String, val capacity: Long, val limbo: Long, val note: String)
+
+    suspend fun pendingClose(): List<Closing> {
+        val m = call { Lndmobile.pendingChannels(ByteArray(0), it) }
+        val waiting = m.msgs(5).map { w ->
+            val ch = w.msg(1)
+            Closing(ch.string(1), ch.long(3), w.long(2), "closing · waiting for the closing transaction to confirm")
+        }
+        val forced = m.msgs(4).map { f ->
+            val ch = f.msg(1)
+            val left = f.int(5)
+            Closing(ch.string(1), ch.long(3), f.long(3),
+                if (left > 0) "force closed · your sats unlock in $left blocks" else "force closed · sweeping your sats")
+        }
+        return waiting + forced
+    }
+
     data class PayReq(val destination: String, val hash: String, val sats: Long, val description: String, val expiry: Long, val timestamp: Long)
 
     suspend fun decode(invoice: String): PayReq {
@@ -291,6 +309,56 @@ object Lnd {
             }
             Lndmobile.sendCoins(req.build(), it)
         }.string(1)
+
+    /** An invoice and its payment hash (hex), to follow it until it is paid. */
+    suspend fun addInvoiceWithHash(sats: Long, memo: String, expirySeconds: Long = 3600): Pair<String, String> {
+        val m = call {
+            Lndmobile.addInvoice(Pb().string(1, memo).int(5, sats).int(11, expirySeconds).bool(15, true).build(), it)
+        }
+        return m.string(2) to m.bytes(1).joinToString("") { "%02x".format(it) }
+    }
+
+    /** lnrpc.Invoice.state: 0 open, 1 settled, 2 canceled, 3 accepted. */
+    suspend fun invoiceState(rHashHex: String): Int {
+        val h = rHashHex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+        return call { Lndmobile.lookupInvoice(Pb().bytes(2, h).build(), it) }.int(21)
+    }
+
+    data class Invoice(val memo: String, val sats: Long, val paid: Long, val created: Long, val settled: Long, val state: Int)
+
+    suspend fun invoices(max: Int = 30): List<Invoice> =
+        call { Lndmobile.listInvoices(Pb().int(5, max).bool(6, true).build(), it) }.msgs(1).map {
+            Invoice(it.string(1), it.long(5), it.long(19), it.long(7), it.long(8), it.int(21))
+        }.sortedByDescending { it.created }
+
+    data class Payment(val sats: Long, val fee: Long, val timeSec: Long, val status: Int, val hash: String)
+
+    suspend fun payments(max: Int = 30): List<Payment> =
+        call { Lndmobile.listPayments(Pb().int(3, max).bool(4, true).build(), it) }.msgs(1).map {
+            Payment(it.long(7), it.long(11), it.long(13) / 1_000_000_000, it.int(10), it.string(1))
+        }.sortedByDescending { it.timeSec }
+
+    /**
+     * Closes a channel ("txid:index"): cooperatively unless [force] (only for a peer that is
+     * gone: the money is then locked for the channel's delay). [delivery] sends a cooperative
+     * close straight to that address; blank, it goes to the node's on-chain wallet. Returns the
+     * closing transaction's id once it is published.
+     */
+    suspend fun closeChannel(point: String, force: Boolean, delivery: String?, satPerVbyte: Long): String =
+        suspendCancellableCoroutine { cont ->
+            val req = Pb().msg(1, Pb().string(2, point.substringBefore(':')).int(3, point.substringAfter(':').toInt()))
+                .bool(2, force)
+            if (!force) {
+                req.int(6, satPerVbyte)
+                if (!delivery.isNullOrBlank()) req.string(5, delivery.trim())
+            }
+            stream({ Lndmobile.closeChannel(req.build(), it) }, onMsg = { u ->
+                if (u.has(1)) {
+                    val txid = u.msg(1).bytes(1).reversedArray().joinToString("") { "%02x".format(it) }
+                    if (cont.isActive) cont.resume(txid)
+                }
+            }, onEnd = { e -> if (cont.isActive) cont.resumeWithException(e ?: LndError("the close ended without an answer")) })
+        }
 
     suspend fun addInvoice(sats: Long, memo: String, expirySeconds: Long = 3600): String =
         call {

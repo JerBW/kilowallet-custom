@@ -75,6 +75,9 @@ object Lightning {
         data class Running(
             val info: Lnd.Info, val balances: Lnd.Balances?, val channels: List<Lnd.Channel>,
             val pending: List<Lnd.Pending>, val tip: Int,
+            val closing: List<Lnd.Closing> = emptyList(),
+            val invoices: List<Lnd.Invoice> = emptyList(),
+            val payments: List<Lnd.Payment> = emptyList(),
         ) : Status()
         data class Failed(val message: String) : Status()
     }
@@ -242,7 +245,10 @@ object Lightning {
             val b = runCatching { Lnd.balances() }.getOrNull()
             val ch = runCatching { Lnd.channels() }.getOrDefault(emptyList())
             val p = runCatching { Lnd.pendingOpen() }.getOrDefault(emptyList())
-            _status.value = Status.Running(info, b, ch, p, chainTip)
+            val cl = runCatching { Lnd.pendingClose() }.getOrDefault(emptyList())
+            val inv = runCatching { Lnd.invoices() }.getOrDefault(emptyList())
+            val pay = runCatching { Lnd.payments() }.getOrDefault(emptyList())
+            _status.value = Status.Running(info, b, ch, p, chainTip, cl, inv, pay)
         }.onFailure {
             // The wallet RPC can answer before LND has looked at its database, so the state read
             // at start may not be the real one: a locked wallet found here is opened here.

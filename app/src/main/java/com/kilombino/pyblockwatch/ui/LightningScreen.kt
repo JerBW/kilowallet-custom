@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -99,7 +101,7 @@ fun LightningScreen(vm: WalletViewModel, accent: Color, settings: Boolean) {
                 Text(s.message, style = MaterialTheme.typography.bodySmall, color = TextSoft)
                 TextButton(onClick = { Lightning.resume(ctx) }) { Text("TRY AGAIN", color = accent) }
             }
-            is Lightning.Status.Running -> LnNode(s, accent, settings)
+            is Lightning.Status.Running -> LnNode(s, accent, settings, vm)
         }
     }
 }
@@ -192,7 +194,10 @@ private fun LnIntro(accent: Color, onTurnOn: ((String) -> Unit) -> Unit) {
 private enum class LnSheet { None, Fund, Open, Receive, Pay }
 
 @Composable
-private fun LnNode(s: Lightning.Status.Running, accent: Color, settings: Boolean) {
+private fun LnNode(s: Lightning.Status.Running, accent: Color, settings: Boolean, vm: WalletViewModel) {
+    var closing by remember { mutableStateOf<Lnd.Channel?>(null) }
+    closing?.let { c -> CloseChannelDialog(c, accent, vm) { closing = null } }
+    val book = remember(s) { ledger(s) }
     var sheet by remember { mutableStateOf(LnSheet.None) }
     val i = s.info
     val b = s.balances
@@ -238,12 +243,12 @@ private fun LnNode(s: Lightning.Status.Running, accent: Color, settings: Boolean
     when (sheet) {
         LnSheet.Fund -> FundSheet(accent)
         LnSheet.Open -> OpenSheet(accent, b?.onchainConfirmed ?: 0) { sheet = LnSheet.None }
-        LnSheet.Receive -> ReceiveLn(accent, i.syncedChain && s.channels.any { it.active })
-        LnSheet.Pay -> PaySheet(accent) { sheet = LnSheet.None }
+        LnSheet.Receive -> { ReceiveLn(accent, i.syncedChain && s.channels.any { it.active }); Movements(accent, book.filter { it.delta > 0 }, "Invoices paid to you") }
+        LnSheet.Pay -> { PaySheet(accent) { sheet = LnSheet.None }; Movements(accent, book.filter { it.delta < 0 }, "Payments you made") }
         LnSheet.None -> {}
     }
 
-    if (s.pending.isNotEmpty() || s.channels.isNotEmpty()) Panel(accent = accent) {
+    if (s.pending.isNotEmpty() || s.channels.isNotEmpty() || s.closing.isNotEmpty()) Panel(accent = accent) {
         SectionLabel("Channels", accent)
         s.pending.forEach { p ->
             Spacer(Modifier.height(6.dp))
@@ -260,6 +265,14 @@ private fun LnNode(s: Lightning.Status.Running, accent: Color, settings: Boolean
             if (!c.active && c.peer == Lightning.KILOMBINO_NODE) Lightning.linkError?.let {
                 Text("Cannot reach it: $it", style = MaterialTheme.typography.labelSmall, color = TextFaint)
             }
+            TextButton(onClick = { closing = c }, contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)) {
+                Text("CLOSE CHANNEL", color = accent, style = MaterialTheme.typography.labelSmall)
+            }
+        }
+        s.closing.forEach { c ->
+            Spacer(Modifier.height(6.dp))
+            Text(c.peer.take(16) + "…  " + street(groupSats(c.capacity)) + " sats", style = MaterialTheme.typography.bodySmall, color = TextMain)
+            Text(c.note + " · yours " + street(groupSats(c.limbo)), style = MaterialTheme.typography.bodySmall, color = Warn)
         }
     }
 
@@ -356,8 +369,29 @@ private fun ReceiveLn(accent: Color, ready: Boolean) {
     var invoice by remember { mutableStateOf<String?>(null) }
     var err by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
+    var hash by remember { mutableStateOf<String?>(null) }
+    var paid by remember { mutableStateOf<Long?>(null) }
+    // Follow the invoice until it is paid, then celebrate and clear it.
+    LaunchedEffect(hash) {
+        val h = hash ?: return@LaunchedEffect
+        while (true) {
+            kotlinx.coroutines.delay(2_000)
+            val st = runCatching { withContext(Dispatchers.IO) { Lnd.invoiceState(h) } }.getOrNull()
+            if (st == 1) { paid = amount.toLongOrNull(); invoice = null; hash = null; Lightning.refresh(); break }
+            if (st == 2) { invoice = null; hash = null; break }
+        }
+    }
+    LaunchedEffect(paid) { if (paid != null) { kotlinx.coroutines.delay(4_000); paid = null; amount = ""; memo = "" } }
     Panel(accent = accent) {
         SectionLabel("Invoice", accent)
+        androidx.compose.animation.AnimatedVisibility(visible = paid != null,
+            enter = androidx.compose.animation.scaleIn() + androidx.compose.animation.fadeIn(),
+            exit = androidx.compose.animation.fadeOut()) {
+            Column(Modifier.fillMaxWidth().padding(vertical = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("⚡✅", style = MaterialTheme.typography.displayLarge)
+                Text("Paid! " + street(groupSats(paid ?: 0)) + " sats", style = MaterialTheme.typography.titleLarge, color = Good)
+            }
+        }
         Spacer(Modifier.height(6.dp))
         if (!ready) Explain("You need an active channel, and can receive only up to what the other side holds in it (\"can receive\" under Channels). A new channel you opened starts with everything on your side.")
         OutlinedTextField(amount, { amount = it.filter(Char::isDigit) }, label = { Text("Sats") }, singleLine = true,
@@ -367,8 +401,9 @@ private fun ReceiveLn(accent: Color, ready: Boolean) {
             colors = ButtonDefaults.buttonColors(containerColor = accent), onClick = {
                 err = null; invoice = null; busy = true
                 scope.launch {
-                    runCatching { withContext(Dispatchers.IO) { Lnd.addInvoice(amount.toLong(), memo) } }
-                        .onSuccess { invoice = it }.onFailure { err = "Could not create it: " + (it.message ?: "the node refused") }
+                    runCatching { withContext(Dispatchers.IO) { Lnd.addInvoiceWithHash(amount.toLong(), memo) } }
+                        .onSuccess { invoice = it.first; hash = it.second; paid = null }
+                        .onFailure { err = "Could not create it: " + (it.message ?: "the node refused") }
                     busy = false
                 }
             }) { Text(if (busy) "CREATING…" else "CREATE INVOICE") }
@@ -837,4 +872,105 @@ private fun LnLog(accent: Color) {
         }) { Text("SHARE NODE LOG", color = accent) }
         msg?.let { Text(it, color = Bad, style = MaterialTheme.typography.bodySmall) }
     }
+}
+
+/** One movement in the channels: [delta] in sats (+ received, − paid with its fee), [left] after it. */
+private data class LnEntry(val time: Long, val delta: Long, val label: String, val left: Long)
+
+/**
+ * Received invoices and sent payments, newest first, each with what was left in the channels
+ * after it: worked back from the balance now (channel opens and closes are not in it).
+ */
+private fun ledger(s: Lightning.Status.Running): List<LnEntry> {
+    data class E(val time: Long, val delta: Long, val label: String)
+    val events = s.invoices.filter { it.state == 1 && it.paid > 0 }.map { E(it.settled, it.paid, it.memo.ifBlank { "invoice" }) } +
+        s.payments.filter { it.status == 2 }.map { E(it.timeSec, -(it.sats + it.fee), if (it.fee > 0) "payment · fee ${it.fee}" else "payment") }
+    var running = s.balances?.channels ?: 0L
+    return events.sortedByDescending { it.time }.map { e ->
+        LnEntry(e.time, e.delta, e.label, running).also { running -= e.delta }
+    }
+}
+
+@Composable
+private fun Movements(accent: Color, moves: List<LnEntry>, title: String) {
+    if (moves.isEmpty()) return
+    val fmt = remember { java.text.SimpleDateFormat("d MMM HH:mm", java.util.Locale.getDefault()) }
+    Panel(accent = accent) {
+        SectionLabel(title, accent)
+        moves.take(20).forEach { m ->
+            Spacer(Modifier.height(6.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(m.label, style = MaterialTheme.typography.bodySmall, color = TextMain, maxLines = 1)
+                    Text(fmt.format(java.util.Date(m.time * 1000)) + " · left " + street(groupSats(m.left)),
+                        style = MaterialTheme.typography.labelSmall, color = TextFaint)
+                }
+                Text((if (m.delta > 0) "+" else "−") + street(groupSats(kotlin.math.abs(m.delta))),
+                    style = MaterialTheme.typography.bodyMedium, color = if (m.delta > 0) Good else TextSoft)
+            }
+        }
+    }
+}
+
+/**
+ * Closing a channel: cooperatively to this wallet's BTC account, the node's on-chain coins or a
+ * pasted address; or forced, for a peer that is gone (the money then waits the channel's delay).
+ */
+@Composable
+private fun CloseChannelDialog(c: Lnd.Channel, accent: Color, vm: WalletViewModel, onDone: () -> Unit) {
+    val scope = rememberCoroutineScope()
+    val btc = remember { runCatching { vm.receiveAddress(vm.nextReceiveIndex())?.first }.getOrNull() }
+    var dest by remember { mutableStateOf(if (btc != null) 0 else 1) }   // 0 BTC wallet, 1 node, 2 pasted
+    var pasted by remember { mutableStateOf("") }
+    var fee by remember { mutableStateOf("1") }
+    var force by remember { mutableStateOf(false) }
+    var busy by remember { mutableStateOf(false) }
+    var msg by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
+    AlertDialog(onDismissRequest = { if (!busy) onDone() },
+        title = { Text("Close the channel with ${c.peerAlias.ifBlank { c.peer.take(12) + "…" }}?") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.verticalScroll(androidx.compose.foundation.rememberScrollState())) {
+                Text("Your " + groupSats(c.local) + " sats come back on-chain, minus the closing fee.", style = MaterialTheme.typography.bodySmall)
+                if (!force) {
+                    Text("Send them to:", style = MaterialTheme.typography.bodySmall)
+                    if (btc != null) Row(verticalAlignment = Alignment.CenterVertically) {
+                        androidx.compose.material3.RadioButton(selected = dest == 0, onClick = { dest = 0 })
+                        Text("My BTC wallet (" + btc.take(10) + "…)", style = MaterialTheme.typography.bodySmall)
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        androidx.compose.material3.RadioButton(selected = dest == 1, onClick = { dest = 1 })
+                        Text("The Lightning node's on-chain coins", style = MaterialTheme.typography.bodySmall)
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        androidx.compose.material3.RadioButton(selected = dest == 2, onClick = { dest = 2 })
+                        Text("Another address", style = MaterialTheme.typography.bodySmall)
+                    }
+                    if (dest == 2) OutlinedTextField(pasted, { pasted = it.trim().removePrefix("bitcoin:").substringBefore('?') },
+                        label = { Text("bc1…") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(fee, { fee = it.filter(Char::isDigit) }, label = { Text("Fee rate (sat/vB)") }, singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    androidx.compose.material3.Checkbox(checked = force, onCheckedChange = { force = it })
+                    Text("Force close (only if the other node is gone for good)", style = MaterialTheme.typography.bodySmall)
+                }
+                if (force) Text("A forced close needs no answer from the peer, but your sats stay locked for the channel's delay (often 1–2 weeks) and the fee is set by the channel, not by you. It goes to the node's on-chain coins.",
+                    style = MaterialTheme.typography.bodySmall, color = Warn)
+                msg?.let { (t, ok) -> Text(t, color = if (ok) Good else Bad, style = MaterialTheme.typography.bodySmall) }
+            }
+        },
+        confirmButton = {
+            if (msg?.second == true) TextButton(onClick = onDone) { Text("OK", color = accent) }
+            else TextButton(enabled = !busy && (force || dest != 2 || pasted.length > 20), onClick = {
+                busy = true; msg = null
+                val to = when { force -> null; dest == 0 -> btc; dest == 2 -> pasted; else -> null }
+                scope.launch {
+                    runCatching { withContext(Dispatchers.IO) { Lnd.closeChannel(c.point, force, to, (fee.toLongOrNull() ?: 1).coerceAtLeast(1)) } }
+                        .onSuccess { msg = "Closing: transaction ${it.take(16)}…. It shows under Channels until it confirms." to true; Lightning.refresh() }
+                        .onFailure { msg = (it.message ?: "could not close") to false }
+                    busy = false
+                }
+            }) { Text(if (busy) "CLOSING…" else if (force) "FORCE CLOSE" else "CLOSE", color = if (force) Bad else accent) }
+        },
+        dismissButton = { if (msg?.second != true) TextButton(enabled = !busy, onClick = onDone) { Text("CANCEL") } })
 }
