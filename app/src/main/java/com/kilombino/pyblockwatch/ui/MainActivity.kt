@@ -826,7 +826,9 @@ private fun AddressList(rows: List<AddressRow>, accent: Color, vm: WalletViewMod
     if (held.isEmpty()) return
     // The coins in each address, with their height, for the confirmations.
     var coins by remember { mutableStateOf<Map<String, List<Scanner.SpendableUtxo>>?>(null) }
-    LaunchedEffect(held.map { it.scriptHash to it.total }) {
+    // Looked up again when a coin confirms (its total stays the same but moves from unconfirmed
+    // to confirmed) and on each new block, so the confirmations keep pace with the movements.
+    LaunchedEffect(held.map { Triple(it.scriptHash, it.total, it.confirmed) }, tip) {
         coins = runCatching { vm.addressCoins(chain, held) }.getOrNull()
     }
     var open by remember { mutableStateOf<AddressRow?>(null) }
