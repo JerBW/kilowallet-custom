@@ -567,6 +567,18 @@ object Ark {
      * deposit transaction that funded a move into Ark is left out: the move already shows.
      * On-chain entries have no clock time, only a block, so their time is estimated from it.
      */
+    /** Confirmations of any transaction, from the chain source: 0 in the mempool, null if unknown. */
+    private fun chainConfs(txid: String, tip: Int): Int? = runCatching {
+        val c = (URL("$ESPLORA/tx/$txid/status").openConnection() as HttpURLConnection).apply {
+            connectTimeout = 10_000; readTimeout = 10_000
+        }
+        val o = JSONObject(c.inputStream.bufferedReader().use { it.readText() })
+        if (!o.optBoolean("confirmed")) 0 else if (tip < 0) null else (tip - o.optInt("block_height") + 1).coerceAtLeast(1)
+    }.getOrNull()
+
+    /** Blocks deep a withdrawal must be before the engine calls it done (bark's mainnet default). */
+    const val OFFBOARD_CONFIRMATIONS = 2
+
     fun activity(): List<Movement> {
         val txs = depositTxs()
         val tip = runCatching { JSONObject(call("GET", "/bitcoin/tip")).optInt("tip_height", -1) }.getOrDefault(-1)
@@ -579,6 +591,10 @@ object Ark {
         val moves = history().map { m ->
             when {
                 m.kind == "move into Ark" && m.status != "successful" -> m.copy(confirmations = confs(m.onchainTxid))
+                // The engine calls a withdrawal done after OFFBOARD_CONFIRMATIONS; until then its
+                // transaction pays an address outside the deposit, so it is asked about by id.
+                m.kind == "withdrawal" && m.status == "pending" && m.onchainTxid != null ->
+                    m.copy(confirmations = chainConfs(m.onchainTxid, tip))
                 m.kind == "emergency exit" && m.status == "pending" && m.vtxos.any { it in lost } -> m.copy(status = "lost")
                 else -> m
             }
