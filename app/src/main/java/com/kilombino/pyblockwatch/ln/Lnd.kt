@@ -238,9 +238,29 @@ object Lnd {
     }
 
     /** Sends the node's on-chain coins to [address]; [all] sweeps everything. Returns the txid. */
-    suspend fun sendCoins(address: String, sats: Long, satPerVbyte: Long, all: Boolean = false): String =
+    /** One of the node's on-chain coins. [outpoint] is "txid:vout". */
+    data class Utxo(val outpoint: String, val address: String, val sats: Long, val confirmations: Long)
+
+    suspend fun utxos(): List<Utxo> =
+        call { Lndmobile.listUnspent(Pb().int(1, 0).int(2, Int.MAX_VALUE).build(), it) }.msgs(1).map { u ->
+            val op = u.msg(5)
+            Utxo("${op.string(2)}:${op.int(3)}", u.string(2), u.long(3), u.long(6))
+        }.sortedByDescending { it.sats }
+
+    /**
+     * Sends the node's on-chain coins to [address]: [sats], or everything chosen with [all].
+     * [coins] ("txid:vout") limits it to those coins (coin control); empty lets LND choose.
+     * LND keeps back what anchor channels need for fee bumping. Returns the txid.
+     */
+    suspend fun sendCoins(address: String, sats: Long, satPerVbyte: Long, all: Boolean = false, coins: List<String> = emptyList()): String =
         call {
-            Lndmobile.sendCoins(Pb().string(1, address).int(2, if (all) 0 else sats).int(4, satPerVbyte).bool(6, all).build(), it)
+            val req = Pb().string(1, address).int(2, if (all) 0 else sats).int(4, satPerVbyte).bool(6, all)
+                .string(7, "Kilowallet")
+            if (coins.isNotEmpty()) req.bool(9, true)
+            coins.forEach { c ->
+                req.msg(11, Pb().string(2, c.substringBefore(':')).int(3, c.substringAfter(':').toInt()))
+            }
+            Lndmobile.sendCoins(req.build(), it)
         }.string(1)
 
     suspend fun addInvoice(sats: Long, memo: String, expirySeconds: Long = 3600): String =

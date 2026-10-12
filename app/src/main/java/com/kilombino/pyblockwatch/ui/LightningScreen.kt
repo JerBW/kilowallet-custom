@@ -199,11 +199,17 @@ private fun LnNode(s: Lightning.Status.Running, accent: Color) {
     }
 
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        listOf("FUND" to LnSheet.Fund, "CHANNEL" to LnSheet.Open, "RECEIVE" to LnSheet.Receive, "PAY" to LnSheet.Pay).forEach { (t, v) ->
+        listOf(("⛓" to "FUND") to LnSheet.Fund, ("🤝" to "CHANNEL") to LnSheet.Open,
+               ("⚡" to "INVOICE") to LnSheet.Receive, ("📤" to "PAY") to LnSheet.Pay).forEach { (t, v) ->
+            val (icon, name) = t
             Button(onClick = { sheet = if (sheet == v) LnSheet.None else v }, modifier = Modifier.weight(1f),
                 colors = ButtonDefaults.buttonColors(containerColor = if (sheet == v) accent else accent.copy(alpha = 0.25f)),
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp, vertical = 8.dp)) {
-                Text(t, style = MaterialTheme.typography.labelSmall, maxLines = 1, color = if (sheet == v) Ink else TextMain)
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(icon, style = MaterialTheme.typography.titleMedium, maxLines = 1)
+                    Text(name, style = MaterialTheme.typography.labelSmall, maxLines = 1, softWrap = false, color = if (sheet == v) Ink else TextMain)
+                }
             }
         }
     }
@@ -212,7 +218,7 @@ private fun LnNode(s: Lightning.Status.Running, accent: Color) {
         LnSheet.Fund -> FundSheet(accent)
         LnSheet.Open -> OpenSheet(accent, b?.onchainConfirmed ?: 0) { sheet = LnSheet.None }
         LnSheet.Receive -> ReceiveLn(accent, i.syncedChain && s.channels.any { it.active })
-        LnSheet.Pay -> PayLn(accent) { sheet = LnSheet.None }
+        LnSheet.Pay -> { PayLn(accent) { sheet = LnSheet.None }; PayOnchain(accent) }
         LnSheet.None -> {}
     }
 
@@ -266,10 +272,10 @@ private fun FundSheet(accent: Color) {
 @Composable
 private fun OpenSheet(accent: Color, onchain: Long, onDone: () -> Unit) {
     val scope = rememberCoroutineScope()
-    var custom by remember { mutableStateOf(false) }
+    var custom by remember { mutableStateOf(true) }
     var node by remember { mutableStateOf("") }
     var amount by remember { mutableStateOf("") }
-    var fee by remember { mutableStateOf("2") }
+    var fee by remember { mutableStateOf("1") }
     var busy by remember { mutableStateOf(false) }
     var msg by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
     Panel(accent = accent) {
@@ -299,7 +305,7 @@ private fun OpenSheet(accent: Color, onchain: Long, onDone: () -> Unit) {
                                              else Lightning.KILOMBINO_NODE to Lightning.KILOMBINO_HOST
                             require(pk.length == 66) { "The node must be pubkey@host:port" }
                             if (host.isNotEmpty()) Lnd.connect(pk, host)
-                            Lnd.openChannel(pk, amount.toLong(), (fee.toLongOrNull() ?: 2).coerceAtLeast(1))
+                            Lnd.openChannel(pk, amount.toLong(), (fee.toLongOrNull() ?: 1).coerceAtLeast(1))
                         }
                     }.onSuccess { msg = "Opening. Funding transaction ${it.take(16)}…; usable once it confirms (the peer decides how many blocks, usually 1 to 3). Save a new backup file (Settings) so it includes this channel." to true; Lightning.refresh() }
                      .onFailure { msg = (it.message ?: "could not open the channel") to false }
@@ -319,7 +325,7 @@ private fun ReceiveLn(accent: Color, ready: Boolean) {
     var invoice by remember { mutableStateOf<String?>(null) }
     var err by remember { mutableStateOf<String?>(null) }
     Panel(accent = accent) {
-        SectionLabel("Receive", accent)
+        SectionLabel("Invoice", accent)
         Spacer(Modifier.height(6.dp))
         if (!ready) Explain("You need an active channel, and can receive only up to what the other side holds in it (\"can receive\" under Channels). A new channel you opened starts with everything on your side.")
         OutlinedTextField(amount, { amount = it.filter(Char::isDigit) }, label = { Text("Sats") }, singleLine = true,
@@ -352,7 +358,7 @@ private fun PayLn(accent: Color, onDone: () -> Unit) {
     var busy by remember { mutableStateOf(false) }
     var msg by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
     Panel(accent = accent) {
-        SectionLabel("Pay", accent)
+        SectionLabel("Pay a Lightning invoice", accent)
         val clip = LocalClipboardManager.current
         OutlinedTextField(text, { text = it.trim(); req = null; msg = null }, label = { Text("Lightning invoice (lnbc…)") },
             modifier = Modifier.fillMaxWidth(), maxLines = 4)
@@ -415,4 +421,87 @@ private fun SaveChannelBackup(accent: Color, hasChannels: Boolean) {
         TextButton(onClick = { save.launch("kilowallet-channel.backup") }) { Text("SAVE CHANNEL BACKUP", color = accent) }
         msg?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = if (it.startsWith("Error")) Bad else Good) }
     }
+}
+
+/**
+ * Pays from the node's on-chain coins, with coin control: to empty the node once done with
+ * Lightning (after closing the channels), or to move a coin out. Every coin is ticked to
+ * start; with no amount, everything ticked goes (minus the fee).
+ */
+@Composable
+private fun PayOnchain(accent: Color) {
+    val scope = rememberCoroutineScope()
+    val clip = LocalClipboardManager.current
+    var coins by remember { mutableStateOf<List<Lnd.Utxo>?>(null) }
+    var picked by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var address by remember { mutableStateOf("") }
+    var amount by remember { mutableStateOf("") }
+    var fee by remember { mutableStateOf("1") }
+    var confirm by remember { mutableStateOf(false) }
+    var busy by remember { mutableStateOf(false) }
+    var msg by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
+    LaunchedEffect(Unit) {
+        coins = runCatching { withContext(Dispatchers.IO) { Lnd.utxos() } }.getOrDefault(emptyList())
+        picked = coins.orEmpty().map { it.outpoint }.toSet()
+    }
+    val chosen = coins.orEmpty().filter { it.outpoint in picked }
+    val total = chosen.sumOf { it.sats }
+    val all = amount.isBlank()
+    Panel(accent = accent) {
+        SectionLabel("Pay on-chain from the node", accent)
+        Spacer(Modifier.height(6.dp))
+        Explain("To empty the node when you are done with Lightning (close the channels first), or to move a coin out. Tick the coins to spend; with no amount, all of them go.")
+        when {
+            coins == null -> Text("Loading the node's coins…", style = MaterialTheme.typography.bodySmall, color = TextFaint)
+            coins!!.isEmpty() -> Text("The node has no on-chain coins.", style = MaterialTheme.typography.bodySmall, color = TextFaint)
+            else -> coins!!.forEach { u ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    androidx.compose.material3.Checkbox(checked = u.outpoint in picked, onCheckedChange = { on ->
+                        picked = if (on) picked + u.outpoint else picked - u.outpoint
+                    })
+                    Column {
+                        Text(street(groupSats(u.sats)) + " sats", style = MaterialTheme.typography.bodySmall, color = TextMain)
+                        Text(u.outpoint.take(12) + "…:" + u.outpoint.substringAfter(':') + " · " +
+                            (if (u.confirmations > 0) "${u.confirmations} conf" else "unconfirmed"),
+                            style = MaterialTheme.typography.labelSmall, color = TextFaint)
+                    }
+                }
+            }
+        }
+        OutlinedTextField(address, { address = it.trim() }, label = { Text("Address (bc1…)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        TextButton(onClick = { clip.getText()?.text?.trim()?.removePrefix("bitcoin:")?.substringBefore('?')?.let { address = it } }) { Text("PASTE", color = accent) }
+        OutlinedTextField(amount, { amount = it.filter(Char::isDigit) }, label = { Text("Sats (blank = all ticked: " + street(groupSats(total)) + ")") },
+            singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(fee, { fee = it.filter(Char::isDigit) }, label = { Text("Fee rate (sat/vB)") }, singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
+        Explain("With open anchor channels, LND keeps a reserve on-chain for fee bumping, so it may not let you send everything.")
+        Button(enabled = !busy && chosen.isNotEmpty() && address.length > 20 && (all || (amount.toLongOrNull() ?: 0) > 0),
+            modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = accent),
+            onClick = { confirm = true }) { Text(if (busy) "SENDING…" else "SEND") }
+        msg?.let { (t, ok) -> Text(t, color = if (ok) Good else Bad, style = MaterialTheme.typography.bodySmall) }
+    }
+    if (confirm) AlertDialog(onDismissRequest = { confirm = false },
+        title = { Text(if (all) "Send everything ticked?" else "Send ${groupSats(amount.toLongOrNull() ?: 0)} sats?") },
+        text = {
+            Text("From ${chosen.size} coin(s) (${groupSats(total)} sats) of the Lightning node to ${address.take(14)}…${address.takeLast(6)} at " +
+                "${fee.ifBlank { "1" }} sat/vB." + (if (all) " The fee comes out of the amount." else ""),
+                style = MaterialTheme.typography.bodySmall)
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                confirm = false; busy = true; msg = null
+                scope.launch {
+                    runCatching {
+                        withContext(Dispatchers.IO) {
+                            Lnd.sendCoins(address.removePrefix("bitcoin:"), amount.toLongOrNull() ?: 0,
+                                (fee.toLongOrNull() ?: 1).coerceAtLeast(1), all, chosen.map { it.outpoint })
+                        }
+                    }.onSuccess { msg = "Sent: transaction ${it.take(16)}…" to true; Lightning.refresh()
+                        coins = runCatching { withContext(Dispatchers.IO) { Lnd.utxos() } }.getOrNull() }
+                     .onFailure { msg = (it.message ?: "could not send") to false }
+                    busy = false
+                }
+            }) { Text("SEND", color = accent) }
+        },
+        dismissButton = { TextButton(onClick = { confirm = false }) { Text("CANCEL") } })
 }
