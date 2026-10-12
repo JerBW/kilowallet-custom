@@ -95,6 +95,20 @@ object Lnd {
     /** The node stopped on its own (it logs why): the next [start] starts it again. */
     fun markStopped() { running = false }
 
+    /**
+     * How far the chain sync has got while LND does not answer yet (its RPC only opens once
+     * neutrino has caught up): the highest block height in the end of its log, or null.
+     */
+    fun syncHeight(ctx: Context): Int? = runCatching {
+        val f = File(dir(ctx), "logs/bitcoin/mainnet/lnd.log")
+        java.io.RandomAccessFile(f, "r").use { r ->
+            val n = minOf(r.length(), 48_000L)
+            r.seek(r.length() - n)
+            val b = ByteArray(n.toInt()); r.readFully(b)
+            Regex("""height[= ](\d{3,7})""").findAll(String(b, Charsets.UTF_8)).maxOfOrNull { it.groupValues[1].toInt() }
+        }
+    }.getOrNull()
+
     /** The last error LND logged, to show when it does not come up. */
     fun lastError(ctx: Context): String? = runCatching {
         File(dir(ctx), "logs/bitcoin/mainnet/lnd.log").readLines().lastOrNull { "[ERR]" in it }

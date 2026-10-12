@@ -44,11 +44,18 @@ object Lightning {
         val birthday = prefs.getLong("birthday", 0L)
         if (birthday == 0L) return null
         val o = org.json.JSONObject().put("birthday", birthday)
-        File(Lnd.dir(ctx), "data/chain/bitcoin/mainnet/channel.backup").takeIf { it.exists() }?.let {
+        channelBackupFile(ctx).takeIf { it.exists() }?.let {
             o.put("scb", android.util.Base64.encodeToString(it.readBytes(), android.util.Base64.NO_WRAP))
         }
         return o
     }
+
+    /** LND's own channel backup file, kept current by the node (encrypted with its keys). */
+    fun channelBackupFile(ctx: Context) = File(Lnd.dir(ctx), "data/chain/bitcoin/mainnet/channel.backup")
+
+    /** A channel backup file from the old phone, handed to the node when its wallet is made here. */
+    fun stageScb(ctx: Context, bytes: ByteArray) = File(ctx.noBackupFilesDir, RESTORE_SCB).writeBytes(bytes)
+    fun hasStagedScb(ctx: Context) = File(ctx.noBackupFilesDir, RESTORE_SCB).exists()
 
     /** Keeps what [exportBackup] saved for the next time Lightning is turned on here. */
     fun stageRestore(ctx: Context, o: org.json.JSONObject) {
@@ -62,7 +69,8 @@ object Lightning {
 
     sealed class Status {
         object Off : Status()
-        data class Starting(val step: String) : Status()
+        /** [height] is how far the chain sync has got, when known (shown against the tip). */
+        data class Starting(val step: String, val height: Int? = null) : Status()
         data class Running(
             val info: Lnd.Info, val balances: Lnd.Balances?, val channels: List<Lnd.Channel>,
             val pending: List<Lnd.Pending>, val tip: Int,
@@ -188,7 +196,8 @@ object Lightning {
             appCtx?.let { app ->
                 if (Lnd.state() == Lnd.WalletState.LOCKED) runCatching { Lnd.unlock(LnSeed.password(app)) }
             }
-            if (_status.value !is Status.Running) _status.value = Status.Starting("catching up with the chain")
+            if (_status.value !is Status.Running)
+                _status.value = Status.Starting("catching up with the chain", appCtx?.let { Lnd.syncHeight(it) })
         }
     }
 

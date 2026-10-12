@@ -660,32 +660,35 @@ private fun WalletScreen(state: UiState, vm: WalletViewModel, onToggleNotificati
     }
 }
 
-/** BTC | ARK | COINJOIN, plus SPAMCOIN while the spamchain (opened from settings) is shown. */
+/** BTC | LIGHTNING | COINJOIN | ARK, plus SPAMCOIN while the spamchain (opened from settings) is shown. */
 @Composable
 private fun AdvancedTabs(chain: Chain, arkTab: Boolean, cjTab: Boolean, lnTab: Boolean, hot: Boolean, onBtc: () -> Unit, onArk: () -> Unit, onCoinjoin: () -> Unit, onLn: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(PanelSoft).padding(4.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
+        // Each tab: its symbol over its name (a chain, lightning, a swirl, a boat).
         val tabs = buildList {
-            add(Triple("BTC", !arkTab && !cjTab && !lnTab && chain == Chain.BLAKE2B, Color(Chain.BLAKE2B.accent)) to onBtc)
+            add(Triple("⛓\nBTC", !arkTab && !cjTab && !lnTab && chain == Chain.BLAKE2B, Color(Chain.BLAKE2B.accent)) to onBtc)
             if (hot) {
-                add(Triple("ARK", arkTab, Purple) to onArk)
-                add(Triple("COINJOIN", cjTab, Good) to onCoinjoin)
-                add(Triple("LN", lnTab, LnGold) to onLn)
+                add(Triple("⚡\nLIGHTNING", lnTab, LnGold) to onLn)
+                add(Triple("🌀\nCOINJOIN", cjTab, Good) to onCoinjoin)
+                add(Triple("⛵\nARK", arkTab, Purple) to onArk)
             }
-            if (!arkTab && !cjTab && !lnTab && chain == Chain.SHA256) add(Triple("SPAMCOIN", true, Color(Chain.SHA256.accent)) to {})
+            if (!arkTab && !cjTab && !lnTab && chain == Chain.SHA256) add(Triple("☣\nSPAMCOIN", true, Color(Chain.SHA256.accent)) to {})
         }
         tabs.forEach { (t, onClick) ->
             val (label, active, color) = t
+            val (icon, name) = label.split("\n")
             val bg by animateColorAsState(if (active) color.copy(alpha = 0.18f) else Color.Transparent, tween(300), label = "tabbg")
             Column(
                 Modifier.weight(1f).clip(RoundedCornerShape(11.dp)).background(bg)
                     .clickable(onClick = onClick).padding(vertical = 10.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Text(label, style = if (tabs.size > 3) MaterialTheme.typography.titleSmall else MaterialTheme.typography.titleMedium,
-                    color = if (active) color else TextFaint, maxLines = 1)
+                Text(icon, style = MaterialTheme.typography.titleMedium, color = if (active) color else TextFaint, maxLines = 1)
+                Text(name, style = if (tabs.size > 3) MaterialTheme.typography.labelSmall else MaterialTheme.typography.titleSmall,
+                    color = if (active) color else TextFaint, maxLines = 1, softWrap = false)
             }
         }
     }

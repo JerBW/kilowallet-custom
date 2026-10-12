@@ -66,8 +66,19 @@ fun LightningScreen(vm: WalletViewModel, accent: Color) {
                     PulseDot(accent); Spacer(Modifier.width(8.dp))
                     Text(s.step.replaceFirstChar { it.uppercase() } + "…", color = TextSoft)
                 }
+                val tip = ui.current.height
+                val h = s.height
+                if (h != null && tip > 0) {
+                    Spacer(Modifier.height(10.dp))
+                    androidx.compose.material3.LinearProgressIndicator(
+                        progress = { (h.toFloat() / tip).coerceIn(0f, 1f) },
+                        modifier = Modifier.fillMaxWidth(), color = accent, trackColor = accent.copy(alpha = 0.15f))
+                    Spacer(Modifier.height(4.dp))
+                    Text("block ${groupSats(minOf(h, tip).toLong())} of ${groupSats(tip.toLong())}",
+                        style = MaterialTheme.typography.bodySmall, color = TextSoft)
+                }
                 Spacer(Modifier.height(6.dp))
-                Explain("The first start downloads block headers and filters from the peers (a few hundred MB, a few minutes on Wi-Fi). Later starts only catch up.")
+                Explain("The first start downloads block headers and filters from the peers (a few hundred MB, a few minutes on Wi-Fi). Later starts only catch up. You can use the other tabs meanwhile: the node keeps going while the app is open.")
             }
             is Lightning.Status.Failed -> Panel(accent = Bad) {
                 Text("Lightning did not start", color = Bad, style = MaterialTheme.typography.titleSmall)
@@ -95,6 +106,37 @@ private fun turnOn(activity: FragmentActivity, vm: WalletViewModel, onError: (St
             }
         },
         onError = onError)
+}
+
+/**
+ * Coming from another phone: its channel backup file (channel.backup, or the one inside the
+ * backup file, which a restore already brings) is handed to the new node, which asks each peer
+ * to close the channels and gets the money back on-chain.
+ */
+@Composable
+private fun RestoreChannels(accent: Color) {
+    val ctx = LocalContext.current
+    var loaded by remember { mutableStateOf(Lightning.hasStagedScb(ctx)) }
+    var msg by remember { mutableStateOf<String?>(null) }
+    val open = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        runCatching { ctx.contentResolver.openInputStream(uri)!!.use { it.readBytes() } }
+            .onSuccess { b ->
+                if (b.size < 32 || b.size > 5_000_000) msg = "That does not look like a channel backup."
+                else { Lightning.stageScb(ctx, b); loaded = true; msg = null }
+            }.onFailure { msg = it.message }
+    }
+    Panel(accent = accent) {
+        SectionLabel("Restoring from an old phone?", accent)
+        Spacer(Modifier.height(6.dp))
+        Explain("If your channels lived on a phone that is lost or wiped, load its channel backup (channel.backup, saved from the old LN tab) before turning on. A backup file (.kab) restored at setup already carries it. The node then asks each peer to close the channels and the money comes back on-chain, in your Lightning node, after their time lock.")
+        Text("Only if the old phone no longer runs Lightning. If it is still alive, the peers may punish the old state and the money is lost.",
+            style = MaterialTheme.typography.bodySmall, color = Warn)
+        if (loaded) Text("✓ Channel backup loaded: it is used when you turn Lightning on.", style = MaterialTheme.typography.bodySmall, color = Good)
+        TextButton(onClick = { open.launch(arrayOf("*/*")) }) { Text(if (loaded) "LOAD ANOTHER CHANNEL BACKUP" else "LOAD CHANNEL BACKUP", color = accent) }
+        msg?.let { Text(it, color = Bad, style = MaterialTheme.typography.bodySmall) }
+    }
 }
 
 @Composable
@@ -129,6 +171,7 @@ private fun LnIntro(accent: Color, onTurnOn: ((String) -> Unit) -> Unit) {
             colors = ButtonDefaults.buttonColors(containerColor = accent)) { Text("TURN ON LIGHTNING") }
         error?.let { Text(it, color = Bad, style = MaterialTheme.typography.bodySmall) }
     }
+    RestoreChannels(accent)
 }
 
 private enum class LnSheet { None, Fund, Open, Receive, Pay }
@@ -189,6 +232,8 @@ private fun LnNode(s: Lightning.Status.Running, accent: Color) {
                 style = MaterialTheme.typography.bodySmall, color = if (c.active) TextSoft else Warn)
         }
     }
+
+    SaveChannelBackup(accent, s.channels.isNotEmpty() || s.pending.isNotEmpty())
 
     Panel(accent = Warn) {
         Explain("Beta. Never run Lightning with these words on another phone or profile at the same time. Node: ${i.pubkey.take(20)}…")
@@ -345,5 +390,29 @@ private fun PayLn(accent: Color, onDone: () -> Unit) {
                 }) { Text(if (busy) "PAYING…" else "PAY", color = accent) }
             },
             dismissButton = { TextButton(enabled = !busy, onClick = { req = null }) { Text("CANCEL") } })
+    }
+}
+
+/** Saves LND's channel backup on its own, for a restore without the full backup file. */
+@Composable
+private fun SaveChannelBackup(accent: Color, hasChannels: Boolean) {
+    if (!hasChannels) return
+    val ctx = LocalContext.current
+    var msg by remember { mutableStateOf<String?>(null) }
+    val save = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        runCatching {
+            val b = Lightning.channelBackupFile(ctx).readBytes()
+            ctx.contentResolver.openOutputStream(uri)!!.use { it.write(b) }
+        }.onSuccess { msg = "Channel backup saved. Save a new one after each channel you open or close." }
+         .onFailure { msg = "Error: ${it.message}" }
+    }
+    Panel(accent = accent) {
+        SectionLabel("Channel backup", accent)
+        Spacer(Modifier.height(6.dp))
+        Explain("With your recovery words, this file gets the channels' money back on a new phone (the backup file in Settings carries it too). It is encrypted with the node's keys.")
+        TextButton(onClick = { save.launch("kilowallet-channel.backup") }) { Text("SAVE CHANNEL BACKUP", color = accent) }
+        msg?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = if (it.startsWith("Error")) Bad else Good) }
     }
 }
