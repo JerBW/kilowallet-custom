@@ -128,7 +128,10 @@ object Lightning {
         }
     }
 
+    @Volatile private var appCtx: Context? = null
+
     private suspend fun bringUp(app: Context, onState: suspend (Lnd.WalletState) -> Unit) {
+        appCtx = app
         _status.value = Status.Starting("starting the node")
         val tor = if (com.kilombino.pyblockwatch.chain.Tor.available) {
             com.kilombino.pyblockwatch.chain.Tor.start(app)
@@ -140,7 +143,7 @@ object Lightning {
         }
         // The wallet RPC comes first; the main RPC once the wallet is open.
         var state = Lnd.state()
-        repeat(30) { if (state == Lnd.WalletState.UNKNOWN || state == Lnd.WalletState.WAITING_TO_START) { delay(1000); state = Lnd.state() } }
+        repeat(90) { if (state == Lnd.WalletState.UNKNOWN || state == Lnd.WalletState.WAITING_TO_START) { delay(1000); state = Lnd.state() } }
         if (state == Lnd.WalletState.UNKNOWN) {
             Lnd.markStopped()
             throw LndError("The node stopped: " + (Lnd.lastError(app) ?: "no answer from it"))
@@ -179,7 +182,14 @@ object Lightning {
             val ch = runCatching { Lnd.channels() }.getOrDefault(emptyList())
             val p = runCatching { Lnd.pendingOpen() }.getOrDefault(emptyList())
             _status.value = Status.Running(info, b, ch, p, chainTip)
-        }.onFailure { if (_status.value !is Status.Running) _status.value = Status.Starting("catching up with the chain") }
+        }.onFailure {
+            // The wallet RPC can answer before LND has looked at its database, so the state read
+            // at start may not be the real one: a locked wallet found here is opened here.
+            appCtx?.let { app ->
+                if (Lnd.state() == Lnd.WalletState.LOCKED) runCatching { Lnd.unlock(LnSeed.password(app)) }
+            }
+            if (_status.value !is Status.Running) _status.value = Status.Starting("catching up with the chain")
+        }
     }
 
     /** Refreshes every few seconds while the LN tab is on screen. */

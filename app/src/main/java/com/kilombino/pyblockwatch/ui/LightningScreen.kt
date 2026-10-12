@@ -238,7 +238,7 @@ private fun OpenSheet(accent: Color, onchain: Long, onDone: () -> Unit) {
             androidx.compose.material3.RadioButton(selected = custom, onClick = { custom = true }); Text("Another node", style = MaterialTheme.typography.bodySmall, color = TextMain)
         }
         if (custom) OutlinedTextField(node, { node = it.trim() }, label = { Text("pubkey@host:port") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-        OutlinedTextField(amount, { amount = it.filter(Char::isDigit) }, label = { Text("Sats (available ${groupSats(onchain)})") }, singleLine = true,
+        OutlinedTextField(amount, { amount = it.filter(Char::isDigit) }, label = { Text("Sats (available " + street(groupSats(onchain)) + ")") }, singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
         OutlinedTextField(fee, { fee = it.filter(Char::isDigit) }, label = { Text("Fee rate (sat/vB)") }, singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
@@ -256,7 +256,7 @@ private fun OpenSheet(accent: Color, onchain: Long, onDone: () -> Unit) {
                             if (host.isNotEmpty()) Lnd.connect(pk, host)
                             Lnd.openChannel(pk, amount.toLong(), (fee.toLongOrNull() ?: 2).coerceAtLeast(1))
                         }
-                    }.onSuccess { msg = "Opening. Funding transaction ${it.take(16)}…; usable after 3 confirmations. Save a new backup file (Settings) so it includes this channel." to true; Lightning.refresh() }
+                    }.onSuccess { msg = "Opening. Funding transaction ${it.take(16)}…; usable once it confirms (the peer decides how many blocks, usually 1 to 3). Save a new backup file (Settings) so it includes this channel." to true; Lightning.refresh() }
                      .onFailure { msg = (it.message ?: "could not open the channel") to false }
                     busy = false
                 }
