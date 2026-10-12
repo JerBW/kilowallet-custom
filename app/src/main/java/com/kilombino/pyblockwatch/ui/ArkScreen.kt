@@ -334,7 +334,9 @@ private fun ArkBalancePanel(b: Ark.Balance?, expiry: Int?, boardConfs: Int?, acc
         Spacer(Modifier.height(6.dp))
         PocketRow("In Ark", b.spendable, "spendable", Good)
         if (b.refused > 0) Text("Not counted: " + street("${groupSats(b.refused)} sats") + " in coins the server refused in the " +
-            "last renewal as already spent (left over from an older wallet state, such as an old backup). RENEW tries them again.",
+            "last renewal as already spent. Usually the same words are open on another phone or profile, and that copy " +
+            "already renewed or spent them: the money is there. Use Ark in one place only; to bring it here, recover " +
+            "Ark from the words again. RENEW tries these coins again.",
             style = MaterialTheme.typography.bodySmall, color = Warn)
         PocketRow("On-chain deposit", deposit,
             if (b.onchainPending > 0) street(groupSats(b.onchainPending)) + " unconfirmed · not in Ark yet" else "not in Ark yet", TextSoft)
