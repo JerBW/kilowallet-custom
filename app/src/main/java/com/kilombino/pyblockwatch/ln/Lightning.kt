@@ -211,7 +211,8 @@ object Lightning {
         poller?.cancel(); poller = null
         if (!on) return
         poller = scope.launch {
-            while (isActive) { refresh(); delay(5_000) }
+            // One failed look must not end the loop (the screen would wait for good).
+            while (isActive) { runCatching { refresh() }; delay(5_000) }
         }
     }
 }

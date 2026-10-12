@@ -122,12 +122,17 @@ object Lnd {
     }
 
     /** One unary call: [f] gets the callback to hand to Lndmobile. */
-    suspend fun call(f: (Callback) -> Unit): PbMsg = suspendCancellableCoroutine { cont ->
-        f(object : Callback {
-            override fun onError(e: Exception) { if (cont.isActive) cont.resumeWithException(LndError(e.message ?: "LND error")) }
-            override fun onResponse(b: ByteArray?) { if (cont.isActive) cont.resume(PbMsg.parse(b ?: ByteArray(0))) }
-        })
-    }
+    // A call LND never answers (it happens while it is still starting) must not hang the caller
+    // for good: the LN tab's refresh loop stopped there until the tab was opened again.
+    suspend fun call(timeoutMs: Long = 60_000, f: (Callback) -> Unit): PbMsg =
+        kotlinx.coroutines.withTimeoutOrNull(timeoutMs) {
+            suspendCancellableCoroutine<PbMsg> { cont ->
+                f(object : Callback {
+                    override fun onError(e: Exception) { if (cont.isActive) cont.resumeWithException(LndError(e.message ?: "LND error")) }
+                    override fun onResponse(b: ByteArray?) { if (cont.isActive) cont.resume(PbMsg.parse(b ?: ByteArray(0))) }
+                })
+            }
+        } ?: throw LndError("the node did not answer")
 
     /** A server stream: [onMsg] for each message, [onEnd] when it ends or fails. */
     fun stream(f: (RecvStream) -> Unit, onMsg: (PbMsg) -> Unit, onEnd: (Exception?) -> Unit) {
@@ -298,6 +303,14 @@ object Lnd {
         val pk = pubkeyHex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
         runCatching { call { Lndmobile.watchtowerClientAddTower(Pb().bytes(1, pk).string(2, address).build(), it) } }
             .onFailure { if (it.message?.contains("already", true) != true) throw it }
+    }
+
+    /**
+     * Hands a channel backup (a channel.backup file) to the running node: for each channel in
+     * it, the node asks the peer to force close and the money comes back on-chain.
+     */
+    suspend fun restoreChannelBackups(multi: ByteArray) {
+        call(120_000) { Lndmobile.restoreChannelBackups(Pb().bytes(2, multi).build(), it) }
     }
 
     /** The Static Channel Backup of every channel, to keep with the backup file. */
