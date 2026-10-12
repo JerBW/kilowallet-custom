@@ -568,14 +568,8 @@ private fun WalletScreen(state: UiState, vm: WalletViewModel, onToggleNotificati
             onLn = { lnTab = true; arkTab = false; cjTab = false; showSend = false; showReceive = false; if (chain != Chain.BLAKE2B) vm.select(Chain.BLAKE2B) })
 
         if (lnTab) {
+            // On this tab settings shows Lightning's own; the wallet's are on the BTC tab.
             LightningScreen(vm, LnGold, showSettings)
-            // Lightning's own settings come first; the wallet's follow, as on the BTC tab.
-            Reveal(showSettings) {
-                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                    SettingsPanel(state, vm, accent, onToggleNotifications) { vm.forget() }
-                    if (state.isHot) HotWordsPanel(vm, accent)
-                }
-            }
             Spacer(Modifier.height(30.dp))
             return@Column
         }

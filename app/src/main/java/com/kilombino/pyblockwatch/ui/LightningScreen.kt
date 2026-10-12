@@ -180,7 +180,7 @@ private fun LnIntro(accent: Color, onTurnOn: ((String) -> Unit) -> Unit) {
             androidx.compose.material3.Checkbox(checked = agreed, onCheckedChange = { agreed = it })
             Text("I understand, it is a beta", style = MaterialTheme.typography.bodySmall, color = TextMain)
         }
-        if (Lnd.stoppedThisRun) Text("Close the app with ⏻ and open it again to turn Lightning on.", style = MaterialTheme.typography.bodySmall, color = Warn)
+        if (Lnd.stoppedThisRun) Text("Close the app with the power button (top right) and open it again to turn Lightning on.", style = MaterialTheme.typography.bodySmall, color = Warn)
         Button(onClick = { error = null; onTurnOn { error = it } }, enabled = agreed && !Lnd.stoppedThisRun, modifier = Modifier.fillMaxWidth(),
             colors = ButtonDefaults.buttonColors(containerColor = accent)) { Text("TURN ON LIGHTNING") }
         error?.let { Text(it, color = Bad, style = MaterialTheme.typography.bodySmall) }
@@ -622,7 +622,7 @@ private fun MoveIn(accent: Color) {
         Explain("If the old phone saved its node with MOVE TO ANOTHER PHONE, load that file here: the node starts with its channels open, as they were.")
         if (Lightning.movedAway(ctx)) Text("This phone's own node was moved out. Turn Lightning on here again only if the other phone no longer runs it.",
             style = MaterialTheme.typography.bodySmall, color = Warn)
-        if (Lnd.stoppedThisRun) Text("Close the app with ⏻ and open it again first: the old node has to let go of its files.",
+        if (Lnd.stoppedThisRun) Text("Close the app with the power button (top right) and open it again first: the old node has to let go of its files.",
             style = MaterialTheme.typography.bodySmall, color = Warn)
         else if (file == null) TextButton(onClick = { open.launch(arrayOf("*/*")) }) { Text("MOVE IN FROM ANOTHER PHONE", color = accent) }
         else {
@@ -689,6 +689,8 @@ private fun DeleteEmptyNode(accent: Color, s: Lightning.Status.Running) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var ask by remember { mutableStateOf(false) }
+    var closeNow by remember { mutableStateOf(false) }
+    val activity = LocalContext.current as FragmentActivity
     val b = s.balances
     val empty = s.channels.isEmpty() && s.pending.isEmpty() && b != null &&
         b.onchainConfirmed == 0L && b.onchainUnconfirmed == 0L && b.channels == 0L && b.pendingOpen == 0L
@@ -699,13 +701,19 @@ private fun DeleteEmptyNode(accent: Color, s: Lightning.Status.Running) {
                 else "Only an empty node can be deleted: close its channels and send its on-chain coins out (PAY → on-chain) first.")
         TextButton(enabled = empty, onClick = { ask = true }) { Text("DELETE THIS NODE", color = if (empty) Warn else TextFaint) }
     }
+    // The engine cannot start again in the same session: the app closes, and the next open
+    // can turn Lightning on or move another node in.
+    if (closeNow) AlertDialog(onDismissRequest = {},
+        title = { Text("Node deleted") },
+        text = { Text("The app closes now. Open it again to turn Lightning on or to move another phone's node in.", style = MaterialTheme.typography.bodySmall) },
+        confirmButton = { TextButton(onClick = { quitApp(activity) }) { Text("CLOSE THE APP", color = accent) } })
     if (ask) AlertDialog(onDismissRequest = { ask = false },
         title = { Text("Delete this Lightning node?") },
         text = { Text("It holds no money. Turning Lightning on again later makes a new node from your words.", style = MaterialTheme.typography.bodySmall) },
         confirmButton = {
             TextButton(onClick = {
                 ask = false
-                scope.launch { withContext(Dispatchers.IO) { Lightning.deleteNode(ctx) } }
+                scope.launch { withContext(Dispatchers.IO) { Lightning.deleteNode(ctx) }; closeNow = true }
             }) { Text("DELETE", color = Warn) }
         },
         dismissButton = { TextButton(onClick = { ask = false }) { Text("CANCEL") } })
