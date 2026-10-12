@@ -67,6 +67,19 @@ object Ark {
         token = null
     }
 
+    /**
+     * Restarts the engine with a recovery-mailbox scan first: the server's record of every
+     * coin these words were given. It brings in coins this phone never recorded (a round that
+     * finished on the server after the app lost track of it, or a renewal made with the same
+     * words on another phone) and marks as spent the ones the server says are gone. Blocking.
+     */
+    fun rescanRecovery(ctx: Context) {
+        File(datadir(ctx), "recovery-rescan").writeText("1")
+        stop()
+        ensureStarted(ctx)
+        setRejected(ctx, emptySet())
+    }
+
     class ArkError(val status: Int, message: String) : Exception(message)
 
     /** The engine words amounts as "0.00009000 BTC"; the wallet speaks in sats. */
@@ -667,7 +680,14 @@ object Ark {
                     if (bad.isEmpty()) error("The renewal round failed. SHARE ENGINE LOG (below) says why.")
                     refused += bad; setRejected(ctx, rejected(ctx) + bad)
                     todo = todo - bad.toSet()
-                    if (todo.isEmpty()) error("The server says every chosen coin was already spent earlier (an older wallet state); they no longer count in your balance.")
+                    if (todo.isEmpty()) {
+                        // Spent coins this wallet still holds mean it missed what replaced them:
+                        // the server's recovery mailbox has those.
+                        rescanRecovery(ctx)
+                        error("The server says the chosen coins were already spent: they were renewed in an " +
+                            "earlier round that this phone did not record. The wallet has now looked for what " +
+                            "replaced them in the server's records; check your balance.")
+                    }
                 }
             }
         }

@@ -214,7 +214,11 @@ private fun ArkScreenBody(vm: WalletViewModel, accent: Color, pull: Int) {
         }
         ArkView.Ready -> {
             ArkBalancePanel(balance, expiry, history.firstOrNull { it.kind == "move into Ark" && it.confirmations != null }?.confirmations,
-                            accent, onFiat = vm::setFiat)
+                            accent, onFiat = vm::setFiat,
+                            onRescan = { run("Looking for missing coins in the server's records…") {
+                                withContext(Dispatchers.IO) { Ark.rescanRecovery(ctx) }
+                                "Looked through the server's records of your coins: the balance above is up to date."
+                            } })
             tipMismatch?.let { Text("⚠ $it", style = MaterialTheme.typography.bodySmall, color = Warn) }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 ArkButton("RECEIVE", sheet == "receive", accent, Modifier.weight(1f)) { sheet = if (sheet == "receive") null else "receive" }
@@ -299,7 +303,7 @@ private fun ArkButton(label: String, selected: Boolean, accent: Color, modifier:
 }
 
 @Composable
-private fun ArkBalancePanel(b: Ark.Balance?, expiry: Int?, boardConfs: Int?, accent: Color, onFiat: (String) -> Unit) {
+private fun ArkBalancePanel(b: Ark.Balance?, expiry: Int?, boardConfs: Int?, accent: Color, onFiat: (String) -> Unit, onRescan: () -> Unit) {
     Panel(accent = accent) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             SectionLabel("Your Ark wallet", accent)
@@ -334,10 +338,10 @@ private fun ArkBalancePanel(b: Ark.Balance?, expiry: Int?, boardConfs: Int?, acc
         Spacer(Modifier.height(6.dp))
         PocketRow("In Ark", b.spendable, "spendable", Good)
         if (b.refused > 0) Text("Not counted: " + street("${groupSats(b.refused)} sats") + " in coins the server refused in the " +
-            "last renewal as already spent. Usually the same words are open on another phone or profile, and that copy " +
-            "already renewed or spent them: the money is there. Use Ark in one place only; to bring it here, recover " +
-            "Ark from the words again. RENEW tries these coins again.",
+            "last renewal as already spent: an earlier round renewed them and this phone did not record the new coins. " +
+            "LOOK FOR MISSING COINS fetches them from the server's records of your coins.",
             style = MaterialTheme.typography.bodySmall, color = Warn)
+        if (b.refused > 0) TextButton(onClick = onRescan) { Text("LOOK FOR MISSING COINS", color = accent) }
         PocketRow("On-chain deposit", deposit,
             if (b.onchainPending > 0) street(groupSats(b.onchainPending)) + " unconfirmed · not in Ark yet" else "not in Ark yet", TextSoft)
         if (b.lightningPending > 0) PocketRow("Lightning", b.lightningPending, "settling", Warn)
