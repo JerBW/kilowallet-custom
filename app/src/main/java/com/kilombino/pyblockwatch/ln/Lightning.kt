@@ -87,6 +87,11 @@ object Lightning {
     /** The chain tip the wallet's own server reports, to show how far the node has synced. */
     @Volatile var chainTip: Int = 0
 
+    /** This phone's node was moved to another phone ([LnMove]). */
+    fun movedAway(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean("moved_away", false)
+
+    fun markOff() { _status.value = Status.Off }
+
     fun enabled(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean("enabled", false)
 
     fun peers(ctx: Context): List<String> =

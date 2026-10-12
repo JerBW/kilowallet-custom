@@ -68,6 +68,15 @@ object LnSeed {
         return hex
     }
 
+    /** Takes over the wallet password of a node moved in from another phone ([LnMove]). */
+    fun setPassword(ctx: Context, pw: ByteArray) {
+        val c = Cipher.getInstance("AES/GCM/NoPadding")
+        c.init(Cipher.ENCRYPT_MODE, key())
+        val enc = c.iv + c.doFinal(pw)
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putString("pw", enc.joinToString("") { "%02x".format(it) }).commit()
+    }
+
     private fun key(): SecretKey {
         val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
         (ks.getKey(KEY_ALIAS, null) as? SecretKey)?.let { return it }

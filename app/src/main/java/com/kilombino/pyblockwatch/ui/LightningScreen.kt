@@ -37,6 +37,7 @@ import androidx.lifecycle.lifecycleScope
 import com.kilombino.pyblockwatch.crypto.Bip39
 import com.kilombino.pyblockwatch.ln.Lightning
 import com.kilombino.pyblockwatch.ln.Lnd
+import com.kilombino.pyblockwatch.ln.LnMove
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -171,6 +172,7 @@ private fun LnIntro(accent: Color, onTurnOn: ((String) -> Unit) -> Unit) {
             colors = ButtonDefaults.buttonColors(containerColor = accent)) { Text("TURN ON LIGHTNING") }
         error?.let { Text(it, color = Bad, style = MaterialTheme.typography.bodySmall) }
     }
+    MoveIn(accent)
     RestoreChannels(accent)
 }
 
@@ -240,6 +242,7 @@ private fun LnNode(s: Lightning.Status.Running, accent: Color) {
     }
 
     SaveChannelBackup(accent, s.channels.isNotEmpty() || s.pending.isNotEmpty())
+    MoveOut(accent)
 
     Panel(accent = Warn) {
         Explain("Beta. Never run Lightning with these words on another phone or profile at the same time. Node: ${i.pubkey.take(20)}…")
@@ -504,4 +507,117 @@ private fun PayOnchain(accent: Color) {
             }) { Text("SEND", color = accent) }
         },
         dismissButton = { TextButton(onClick = { confirm = false }) { Text("CANCEL") } })
+}
+
+@Composable
+private fun PasswordFields(pw1: String, pw2: String?, on1: (String) -> Unit, on2: ((String) -> Unit)?) {
+    OutlinedTextField(pw1, on1, label = { Text("password") }, singleLine = true,
+        visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password), modifier = Modifier.fillMaxWidth())
+    if (pw2 != null && on2 != null) OutlinedTextField(pw2, on2, label = { Text("repeat password") }, singleLine = true,
+        isError = pw2.isNotEmpty() && pw1 != pw2,
+        visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password), modifier = Modifier.fillMaxWidth())
+}
+
+/**
+ * Moves the node, channels open, to another phone: a password-protected file with its whole
+ * state. Once the file is saved the node is deleted here, so it can never run twice.
+ */
+@Composable
+private fun MoveOut(accent: Color) {
+    val activity = LocalContext.current as FragmentActivity
+    val ctx = activity.applicationContext
+    val scope = rememberCoroutineScope()
+    var ask by remember { mutableStateOf(false) }
+    var pw1 by remember { mutableStateOf("") }
+    var pw2 by remember { mutableStateOf("") }
+    var pack by remember { mutableStateOf<ByteArray?>(null) }
+    var msg by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
+    val save = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
+        val b = pack ?: return@rememberLauncherForActivityResult
+        if (uri == null) {
+            // Not saved: the node stays here, stopped; it starts again with the app.
+            pack = null; msg = "Not saved. Lightning stays on this phone (it starts again when you reopen the app)." to false
+            return@rememberLauncherForActivityResult
+        }
+        runCatching {
+            ctx.contentResolver.openOutputStream(uri)!!.use { it.write(b) }
+            val back = ctx.contentResolver.openInputStream(uri)!!.use { it.readBytes() }
+            check(back.contentEquals(b)) { "the saved file does not match" }
+        }.onSuccess { pack = null; LnMove.forgetHere(ctx) }
+         .onFailure { msg = "Error saving: ${it.message}. Lightning stays on this phone." to false }
+    }
+    Panel(accent = accent) {
+        SectionLabel("Move Lightning to another phone", accent)
+        Spacer(Modifier.height(6.dp))
+        Explain("Takes the node with its channels OPEN to a new phone: a file protected by a password, with the whole node. Once it is saved, Lightning is deleted from this phone. On the new phone, before turning Lightning on, choose MOVE IN FROM ANOTHER PHONE.")
+        Text("Never use a copy of this file twice, and never turn Lightning on again here with these words while the other phone runs it: an old channel state is punished by losing the whole channel.",
+            style = MaterialTheme.typography.bodySmall, color = Warn)
+        TextButton(onClick = { ask = true; msg = null }) { Text("MOVE TO ANOTHER PHONE", color = accent) }
+        msg?.let { (t, ok) -> Text(t, color = if (ok) Good else Bad, style = MaterialTheme.typography.bodySmall) }
+    }
+    if (ask) AlertDialog(onDismissRequest = { ask = false },
+        title = { Text("Move Lightning out of this phone?") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("The node stops, its whole state goes into a file protected by this password, and Lightning is deleted here once the file is saved. Keep the file and the password: they are the only copy of the open channels until the other phone takes it in.",
+                    style = MaterialTheme.typography.bodySmall)
+                PasswordFields(pw1, pw2, { pw1 = it }, { pw2 = it })
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = pw1.length >= 8 && pw1 == pw2, onClick = {
+                val pw = pw1; ask = false; pw1 = ""; pw2 = ""
+                Biometric.confirm(activity, "Move Lightning out", "Confirm it is you",
+                    onSuccess = {
+                        msg = "Stopping the node and packing it…" to true
+                        scope.launch {
+                            runCatching { withContext(Dispatchers.IO) { LnMove.export(ctx, pw) } }
+                                .onSuccess { pack = it; msg = null; save.launch("kilowallet-lightning.move") }
+                                .onFailure { msg = "Error: ${it.message}" to false }
+                        }
+                    },
+                    onError = { msg = it to false })
+            }) { Text("STOP AND PACK", color = Warn) }
+        },
+        dismissButton = { TextButton(onClick = { ask = false; pw1 = ""; pw2 = "" }) { Text("CANCEL") } })
+}
+
+/** Takes in a node moved from another phone ([MoveOut]), before Lightning is turned on here. */
+@Composable
+private fun MoveIn(accent: Color) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var file by remember { mutableStateOf<ByteArray?>(null) }
+    var pw by remember { mutableStateOf("") }
+    var msg by remember { mutableStateOf<String?>(null) }
+    val open = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        runCatching { ctx.contentResolver.openInputStream(uri)!!.use { it.readBytes() } }
+            .onSuccess { file = it; msg = null }.onFailure { msg = it.message }
+    }
+    Panel(accent = accent) {
+        SectionLabel("Moving in from another phone?", accent)
+        Spacer(Modifier.height(6.dp))
+        Explain("If the old phone saved its node with MOVE TO ANOTHER PHONE, load that file here: the node starts with its channels open, as they were.")
+        if (Lightning.movedAway(ctx)) Text("This phone's own node was moved out. Turn Lightning on here again only if the other phone no longer runs it.",
+            style = MaterialTheme.typography.bodySmall, color = Warn)
+        if (file == null) TextButton(onClick = { open.launch(arrayOf("*/*")) }) { Text("MOVE IN FROM ANOTHER PHONE", color = accent) }
+        else {
+            PasswordFields(pw, null, { pw = it }, null)
+            TextButton(enabled = pw.isNotEmpty(), onClick = {
+                val b = file!!; val p = pw
+                msg = "Unpacking…"
+                scope.launch {
+                    runCatching { withContext(Dispatchers.IO) { LnMove.import(ctx, b, p) } }
+                        .onSuccess { file = null; pw = ""; msg = null; Lightning.resume(ctx) }
+                        .onFailure { msg = it.message }
+                }
+            }) { Text("OPEN AND START", color = accent) }
+        }
+        msg?.let { Text(it, color = if (it == "Unpacking…") TextSoft else Bad, style = MaterialTheme.typography.bodySmall) }
+    }
 }
