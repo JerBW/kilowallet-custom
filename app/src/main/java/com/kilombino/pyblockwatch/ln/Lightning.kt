@@ -24,6 +24,7 @@ object Lightning {
     /** Kilombino's node: offered for the first channel, never required. */
     const val KILOMBINO_NODE = "0222d36d7b634ead665c982145f6e4507ad65c4f369902ab3ca11e379d2139dc60"
     const val KILOMBINO_HOST = "nodoblake2b.airdns.org:50002"
+    const val KILOMBINO_ONION = "eu2pntt4zzsvm2fkcn5uaqxac2mj5t2fk5ecwyhhejp3deu7env2h2ad.onion:9735"
     /** Kilombino's watchtower (onion: reached when Tor is on). */
     const val TOWER = "033f366c8e43b040dbc27648d68e123650ec1f23176de092f39b9e0a7fb4f2a95d"
     const val TOWER_HOST = "b44c2u3dar4fdhb4m4vsp3v6kzohh2cqrggk2io74v4olr4nn5nytyad.onion:9911"
@@ -191,17 +192,31 @@ object Lightning {
      * effort: the watchtower (onion, needs Tor) and a link to Kilombino's node. Retried on
      * each refresh until they take.
      */
-    private suspend fun link() {
+    private suspend fun link(peers: Int) {
         if (torOn && !towerAdded) runCatching { Lnd.addTower(TOWER, TOWER_HOST) }.onSuccess { towerAdded = true }
-        if (!linked) runCatching { Lnd.connect(KILOMBINO_NODE, KILOMBINO_HOST) }.onSuccess { linked = true }
+        // With no peer at all (a fresh or moved node, or one that lost its connection), reach
+        // Kilombino's node again every half minute. The name is resolved here, not by LND: with
+        // Tor on, LND resolves names through Tor, which fails until Tor is up. Its onion is tried too.
+        if (peers > 0) { linked = true; return }
+        val now = System.currentTimeMillis()
+        if (now - lastLink < 30_000) return
+        lastLink = now
+        val host = KILOMBINO_HOST.substringBefore(':'); val port = KILOMBINO_HOST.substringAfter(':')
+        val ips = runCatching { java.net.InetAddress.getAllByName(host).map { it.hostAddress } }.getOrDefault(emptyList())
+        val targets = ips.map { if (':' in it) "[$it]:$port" else "$it:$port" } + KILOMBINO_HOST +
+            (if (torOn) listOf(KILOMBINO_ONION) else emptyList())
+        for (t in targets) if (runCatching { Lnd.connect(KILOMBINO_NODE, t) }.isSuccess) { linked = true; return }
     }
+    @Volatile private var lastLink = 0L
 
     /** Re-reads everything the screen shows. */
-    suspend fun refresh() {
+    suspend fun refresh(): Unit = kotlinx.coroutines.withContext(Dispatchers.IO) { refreshHere() }
+
+    private suspend fun refreshHere() {
         if (!Lnd.running) return
         runCatching {
             val info = Lnd.info()
-            link()
+            link(info.peers)
             val b = runCatching { Lnd.balances() }.getOrNull()
             val ch = runCatching { Lnd.channels() }.getOrDefault(emptyList())
             val p = runCatching { Lnd.pendingOpen() }.getOrDefault(emptyList())

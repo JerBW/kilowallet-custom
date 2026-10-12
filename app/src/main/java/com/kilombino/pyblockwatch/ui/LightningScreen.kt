@@ -198,8 +198,12 @@ private fun LnNode(s: Lightning.Status.Running, accent: Color, settings: Boolean
     Panel(accent = accent) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             PulseDot(if (i.syncedChain) Good else Warn); Spacer(Modifier.width(8.dp))
-            val sync = if (i.syncedChain) "Synced" else "Syncing"
-            val h = if (s.tip > 0 && !i.syncedChain) "block ${groupSats(i.height.toLong())} of ${groupSats(s.tip.toLong())}" else "block ${groupSats(i.height.toLong())}"
+            // At the tip but not yet "synced": the wallet is still looking through the chain's
+            // filters for its own coins (a restored or moved node does this once).
+            val atTip = s.tip > 0 && i.height >= s.tip
+            val sync = when { i.syncedChain -> "Synced"; atTip -> "Checking the wallet's coins"; else -> "Syncing" }
+            val tip = maxOf(s.tip, i.height)
+            val h = if (tip > 0 && !i.syncedChain && !atTip) "block ${groupSats(i.height.toLong())} of ${groupSats(tip.toLong())}" else "block ${groupSats(i.height.toLong())}"
             Text("$sync · $h · ${i.peers} peer" + (if (i.peers == 1) "" else "s"), style = MaterialTheme.typography.bodySmall,
                 color = TextSoft, modifier = Modifier.weight(1f))
             StreetEye(TextSoft)
@@ -234,7 +238,7 @@ private fun LnNode(s: Lightning.Status.Running, accent: Color, settings: Boolean
         LnSheet.Fund -> FundSheet(accent)
         LnSheet.Open -> OpenSheet(accent, b?.onchainConfirmed ?: 0) { sheet = LnSheet.None }
         LnSheet.Receive -> ReceiveLn(accent, i.syncedChain && s.channels.any { it.active })
-        LnSheet.Pay -> { PayLn(accent) { sheet = LnSheet.None }; PayOnchain(accent) }
+        LnSheet.Pay -> PaySheet(accent) { sheet = LnSheet.None }
         LnSheet.None -> {}
     }
 
@@ -345,6 +349,7 @@ private fun ReceiveLn(accent: Color, ready: Boolean) {
     var memo by remember { mutableStateOf("") }
     var invoice by remember { mutableStateOf<String?>(null) }
     var err by remember { mutableStateOf<String?>(null) }
+    var busy by remember { mutableStateOf(false) }
     Panel(accent = accent) {
         SectionLabel("Invoice", accent)
         Spacer(Modifier.height(6.dp))
@@ -352,14 +357,16 @@ private fun ReceiveLn(accent: Color, ready: Boolean) {
         OutlinedTextField(amount, { amount = it.filter(Char::isDigit) }, label = { Text("Sats") }, singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
         OutlinedTextField(memo, { memo = it }, label = { Text("Note (optional, the payer sees it)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-        Button(enabled = (amount.toLongOrNull() ?: 0) > 0, modifier = Modifier.fillMaxWidth(),
+        Button(enabled = !busy && (amount.toLongOrNull() ?: 0) > 0, modifier = Modifier.fillMaxWidth(),
             colors = ButtonDefaults.buttonColors(containerColor = accent), onClick = {
-                err = null
+                err = null; invoice = null; busy = true
                 scope.launch {
                     runCatching { withContext(Dispatchers.IO) { Lnd.addInvoice(amount.toLong(), memo) } }
-                        .onSuccess { invoice = it }.onFailure { err = it.message }
+                        .onSuccess { invoice = it }.onFailure { err = "Could not create it: " + (it.message ?: "the node refused") }
+                    busy = false
                 }
-            }) { Text("CREATE INVOICE") }
+            }) { Text(if (busy) "CREATING…" else "CREATE INVOICE") }
+        err?.let { Text(it, color = Bad, style = MaterialTheme.typography.bodySmall) }
         invoice?.let { inv ->
             Spacer(Modifier.height(8.dp))
             Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) { QrImage(inv.uppercase(), 240) }
@@ -367,14 +374,14 @@ private fun ReceiveLn(accent: Color, ready: Boolean) {
             TextButton(onClick = { clip.setText(AnnotatedString(inv)) }) { Text("COPY", color = accent) }
             Explain("Keep the app open until it is paid. Valid for one hour.")
         }
-        err?.let { Text(it, color = Bad, style = MaterialTheme.typography.bodySmall) }
     }
 }
 
 @Composable
-private fun PayLn(accent: Color, onDone: () -> Unit) {
+private fun PayLn(accent: Color, scanned: String?, onDone: () -> Unit) {
     val scope = rememberCoroutineScope()
     var text by remember { mutableStateOf("") }
+    LaunchedEffect(scanned) { if (scanned != null) text = scanned }
     var req by remember { mutableStateOf<Lnd.PayReq?>(null) }
     var busy by remember { mutableStateOf(false) }
     var msg by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
@@ -449,13 +456,23 @@ private fun SaveChannelBackup(accent: Color) {
  * start; with no amount, everything ticked goes (minus the fee).
  */
 @Composable
-private fun PayOnchain(accent: Color) {
+private fun PayOnchain(accent: Color, scanned: String?) {
     val scope = rememberCoroutineScope()
     val clip = LocalClipboardManager.current
     var coins by remember { mutableStateOf<List<Lnd.Utxo>?>(null) }
     var picked by remember { mutableStateOf<Set<String>>(emptySet()) }
     var address by remember { mutableStateOf("") }
+    var amountFromQr by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(scanned) {
+        if (scanned != null) {
+            address = scanned.substringBefore('?')
+            // bitcoin:addr?amount=0.0001 (BTC) → sats
+            scanned.substringAfter('?', "").split('&').firstOrNull { it.startsWith("amount=") }
+                ?.substringAfter('=')?.toBigDecimalOrNull()?.let { amountFromQr = it.movePointRight(8).toLong().toString() }
+        }
+    }
     var amount by remember { mutableStateOf("") }
+    LaunchedEffect(amountFromQr) { amountFromQr?.let { amount = it } }
     var fee by remember { mutableStateOf("1") }
     var confirm by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
@@ -717,4 +734,47 @@ private fun DeleteEmptyNode(accent: Color, s: Lightning.Status.Running) {
             }) { Text("DELETE", color = Warn) }
         },
         dismissButton = { TextButton(onClick = { ask = false }) { Text("CANCEL") } })
+}
+
+/**
+ * PAY: one camera button for both. A Lightning invoice (lnbc…, lightning:) goes to the
+ * invoice field; a Bitcoin address or bitcoin: URI to the on-chain payment.
+ */
+@Composable
+private fun PaySheet(accent: Color, onDone: () -> Unit) {
+    val ctx = LocalContext.current
+    var scanning by remember { mutableStateOf(false) }
+    var invoice by remember { mutableStateOf<String?>(null) }
+    var onchain by remember { mutableStateOf<String?>(null) }
+    var msg by remember { mutableStateOf<String?>(null) }
+    val camera = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { ok -> if (ok) scanning = true }
+    if (scanning) QrScannerDialog(onResult = { raw ->
+        scanning = false
+        val t = raw.trim()
+        val low = t.lowercase()
+        when {
+            low.startsWith("lightning:") -> { invoice = t.substring(10); msg = null }
+            low.startsWith("lnbc") -> { invoice = t; msg = null }
+            low.startsWith("bitcoin:") -> {
+                // A unified QR carries both: pay over Lightning when it has an invoice.
+                val ln = t.substringAfter('?', "").split('&').firstOrNull { it.lowercase().startsWith("lightning=") }?.substringAfter('=')
+                if (ln != null) invoice = ln else onchain = t.substring(8)
+                msg = null
+            }
+            low.startsWith("bc1") || low.startsWith("1") || low.startsWith("3") -> { onchain = t; msg = null }
+            else -> msg = "That QR is neither a Lightning invoice nor a Bitcoin address."
+        }
+    }, onDismiss = { scanning = false })
+    Button(onClick = {
+        if (androidx.core.content.ContextCompat.checkSelfPermission(ctx, android.Manifest.permission.CAMERA) ==
+            android.content.pm.PackageManager.PERMISSION_GRANTED) scanning = true
+        else camera.launch(android.Manifest.permission.CAMERA)
+    }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = accent.copy(alpha = 0.25f)),
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp)) {
+        Text("📷 SCAN A QR (INVOICE OR ADDRESS)", color = TextMain, style = MaterialTheme.typography.labelSmall)
+    }
+    msg?.let { Text(it, color = Bad, style = MaterialTheme.typography.bodySmall) }
+    PayLn(accent, invoice, onDone)
+    PayOnchain(accent, onchain)
 }
