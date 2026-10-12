@@ -205,8 +205,18 @@ object Lightning {
         val ips = runCatching { java.net.InetAddress.getAllByName(host).map { it.hostAddress } }.getOrDefault(emptyList())
         val targets = ips.map { if (':' in it) "[$it]:$port" else "$it:$port" } + KILOMBINO_HOST +
             (if (torOn) listOf(KILOMBINO_ONION) else emptyList())
-        for (t in targets) if (runCatching { Lnd.connect(KILOMBINO_NODE, t) }.isSuccess) { linked = true; return }
+        val errors = ArrayList<String>()
+        for (t in targets) {
+            val r = runCatching { Lnd.connect(KILOMBINO_NODE, t) }
+            if (r.isSuccess) { linked = true; linkError = null; return }
+            errors += "$t: ${r.exceptionOrNull()?.message}"
+        }
+        linkError = if (targets.isEmpty()) "could not resolve $host" else errors.joinToString("\n")
     }
+
+    /** Why the last attempt to reach Kilombino's node failed, to show under the channel. */
+    @Volatile var linkError: String? = null
+        private set
     @Volatile private var lastLink = 0L
 
     /** Re-reads everything the screen shows. */

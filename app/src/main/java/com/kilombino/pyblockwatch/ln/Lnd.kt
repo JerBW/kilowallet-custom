@@ -61,7 +61,9 @@ object Lnd {
             appendLine("bitcoin.mainnet=true")
             appendLine("bitcoin.node=neutrino")
             appendLine("[neutrino]")
-            peers.forEach { appendLine("neutrino.connect=$it") }
+            // Go's resolver finds no DNS server on Android (there is no /etc/resolv.conf), so a
+            // peer given by name never connects: the app resolves names here, keeping the name too.
+            resolved(peers).forEach { appendLine("neutrino.connect=$it") }
             // Room for every peer given: with fewer slots it drops and redials one every few seconds.
             appendLine("neutrino.maxpeers=${maxOf(4, peers.size + 2)}")
             appendLine("[fee]")
@@ -79,6 +81,24 @@ object Lnd {
         }
         File(d, "lnd.conf").writeText(conf)
     }
+
+    /** [peers] with each host name also given as the addresses Android resolves it to. */
+    fun resolved(peers: List<String>): List<String> = peers.flatMap { p ->
+        val host = p.substringBeforeLast(':'); val port = p.substringAfterLast(':')
+        if (host.any { it.isLetter() } && !host.endsWith(".onion")) {
+            val ips = runCatching { java.net.InetAddress.getAllByName(host).map { it.hostAddress!! } }.getOrDefault(emptyList())
+            ips.map { if (':' in it) "[$it]:$port" else "$it:$port" } + p
+        } else listOf(p)
+    }.distinct()
+
+    /** The end of LND's log, to share when something fails. It names peers and channels, never keys. */
+    fun logTail(ctx: Context, maxBytes: Long = 80_000): String? = runCatching {
+        val f = File(dir(ctx), "logs/bitcoin/mainnet/lnd.log")
+        java.io.RandomAccessFile(f, "r").use { r ->
+            val n = minOf(r.length(), maxBytes); r.seek(r.length() - n)
+            val b = ByteArray(n.toInt()); r.readFully(b); String(b, Charsets.UTF_8).substringAfter('\n')
+        }
+    }.getOrNull()
 
     /** Starts the node (once per process); returns when its RPC answers. */
     suspend fun start(ctx: Context) {

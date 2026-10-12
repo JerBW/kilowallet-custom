@@ -71,6 +71,7 @@ fun LightningScreen(vm: WalletViewModel, accent: Color, settings: Boolean) {
                     }
                     MoveIn(accent)
                     RestoreChannels(accent)
+                    LnLog(accent)
                 }
             }
             is Lightning.Status.Starting -> Panel(accent = accent) {
@@ -256,10 +257,15 @@ private fun LnNode(s: Lightning.Status.Running, accent: Color, settings: Boolean
             Text(name + "  " + street(groupSats(c.capacity)) + " sats", style = MaterialTheme.typography.bodySmall, color = TextMain)
             Text((if (c.active) "active" else "offline") + " · yours " + street(groupSats(c.local)) + " · can receive " + street(groupSats(c.remote)),
                 style = MaterialTheme.typography.bodySmall, color = if (c.active) TextSoft else Warn)
+            if (!c.active && c.peer == Lightning.KILOMBINO_NODE) Lightning.linkError?.let {
+                Text("Cannot reach it: $it", style = MaterialTheme.typography.labelSmall, color = TextFaint)
+            }
         }
     }
 
     if (settings) {
+        ConnectPeer(accent)
+        LnLog(accent)
         SaveChannelBackup(accent)
         RestoreChannelsLive(accent)
         MoveOut(accent)
@@ -777,4 +783,58 @@ private fun PaySheet(accent: Color, onDone: () -> Unit) {
     msg?.let { Text(it, color = Bad, style = MaterialTheme.typography.bodySmall) }
     PayLn(accent, invoice, onDone)
     PayOnchain(accent, onchain)
+}
+
+/** Connects to a node by hand (pubkey@host:port): for a peer the wallet does not reach by itself. */
+@Composable
+private fun ConnectPeer(accent: Color) {
+    val scope = rememberCoroutineScope()
+    var uri by remember { mutableStateOf("") }
+    var msg by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
+    Panel(accent = accent) {
+        SectionLabel("Connect to a node", accent)
+        Spacer(Modifier.height(6.dp))
+        Explain("pubkey@host:port. A channel's peer is reconnected by itself; this is for when it is not, or to reach a new node.")
+        OutlinedTextField(uri, { uri = it.trim() }, label = { Text("pubkey@host:port") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        TextButton(enabled = uri.length > 70 && '@' in uri, onClick = {
+            msg = null
+            scope.launch {
+                runCatching {
+                    withContext(Dispatchers.IO) {
+                        val pk = uri.substringBefore('@'); val host = uri.substringAfter('@')
+                        val tries = Lnd.resolved(listOf(host))
+                        var last: Throwable? = null
+                        for (t in tries) { val r = runCatching { Lnd.connect(pk, t) }; if (r.isSuccess) return@withContext t; last = r.exceptionOrNull() }
+                        throw last ?: IllegalStateException("no address")
+                    }
+                }.onSuccess { msg = "Connected through $it." to true; Lightning.refresh() }
+                 .onFailure { msg = (it.message ?: "could not connect") to false }
+            }
+        }) { Text("CONNECT", color = accent) }
+        msg?.let { (t, ok) -> Text(t, color = if (ok) Good else Bad, style = MaterialTheme.typography.bodySmall) }
+    }
+}
+
+/** Shares the end of LND's log: when something fails, it says why. */
+@Composable
+private fun LnLog(accent: Color) {
+    val ctx = LocalContext.current
+    var msg by remember { mutableStateOf<String?>(null) }
+    Panel(accent = accent) {
+        SectionLabel("Node log", accent)
+        Spacer(Modifier.height(6.dp))
+        Explain("If something fails, share this with whoever helps you. It shows peers, channels and amounts, never your words or keys.")
+        TextButton(onClick = {
+            val log = Lnd.logTail(ctx)
+            if (log.isNullOrBlank()) { msg = "The node has not written a log yet."; return@TextButton }
+            val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(android.content.Intent.EXTRA_SUBJECT, "Kilowallet Lightning log")
+                putExtra(android.content.Intent.EXTRA_TEXT, log)
+            }
+            runCatching { ctx.startActivity(android.content.Intent.createChooser(send, "Share the Lightning log")) }
+                .onFailure { msg = "Could not open the share menu." }
+        }) { Text("SHARE NODE LOG", color = accent) }
+        msg?.let { Text(it, color = Bad, style = MaterialTheme.typography.bodySmall) }
+    }
 }
