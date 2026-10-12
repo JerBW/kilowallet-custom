@@ -1,7 +1,7 @@
-sha256-arm64=d494d02b29bb39622e3bdeb46c3c1febac1ae3d2dc89ea166fb1999802ee322a
+sha256-arm64=19be4b51e02adf523c79158446b892a2f20a3d80d6fa8a708e5fb9d5da848ced
 repo=https://github.com/Kilombino/lnd
 branch=neutrino-blake2b
-commit=2cf2838e519d339c90435f5e4fb48a0fbcbd08e2
+commit=7a8ca829e
 build=lnd-engine/build.sh
 go=1.26.8
 gomobile=v0.0.0-20261011034528-197770444867
