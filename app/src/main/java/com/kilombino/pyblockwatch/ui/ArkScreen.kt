@@ -781,7 +781,11 @@ private fun ArkHistory(items: List<Ark.Movement>, accent: Color, explorer: Strin
 /** The status, with the confirmations so far while a move into Ark or a deposit waits. */
 private fun statusOf(m: Ark.Movement): String {
     val c = m.confirmations ?: return m.status
-    return if (m.kind == "move into Ark") "${m.status} · $c/${Ark.BOARD_CONFIRMATIONS} conf" else "${m.status} · $c conf"
+    return when (m.kind) {
+        "move into Ark" -> "${m.status} · $c/${Ark.BOARD_CONFIRMATIONS} conf"
+        "withdrawal" -> (if (c == 0) "sent, in the mempool" else "sent") + " · $c/${Ark.OFFBOARD_CONFIRMATIONS} conf"
+        else -> "${m.status} · $c conf"
+    }
 }
 
 /** One movement in full, and its blockchain transaction when it has one. */
