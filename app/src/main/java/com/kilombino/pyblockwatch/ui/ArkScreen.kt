@@ -135,7 +135,10 @@ private fun ArkScreenBody(vm: WalletViewModel, accent: Color, pull: Int) {
         history = withContext(Dispatchers.IO) { runCatching { Ark.activity() }.getOrDefault(emptyList()) }
         fingerprint = withContext(Dispatchers.IO) { Ark.stateFingerprint() }
         val arkTip = withContext(Dispatchers.IO) { Ark.tip() }
-        val elTip = vm.state.value.chains[com.kilombino.pyblockwatch.chain.Chain.BLAKE2B]?.height?.takeIf { it > 0 }
+        // Only a height checked this run: the one remembered from the last look (shown while the
+        // wallet checks again) can be blocks old, which is no disagreement.
+        val elTip = vm.state.value.chains[com.kilombino.pyblockwatch.chain.Chain.BLAKE2B]
+            ?.takeIf { !it.stale }?.height?.takeIf { it > 0 }
         tipMismatch = if (arkTip != null && elTip != null && kotlin.math.abs(arkTip - elTip) > 3)
             "The Ark engine's chain source (block $arkTip) and your BTC server (block $elTip) disagree. One of them " +
                 "is behind or not telling the whole story: wait before moving Ark funds, and check your node."
@@ -330,8 +333,8 @@ private fun ArkBalancePanel(b: Ark.Balance?, expiry: Int?, boardConfs: Int?, acc
         // Where it is: Ark coins, the on-chain deposit, and Lightning still settling.
         Spacer(Modifier.height(6.dp))
         PocketRow("In Ark", b.spendable, "spendable", Good)
-        if (b.refused > 0) Text("Not counted: " + street("${groupSats(b.refused)} sats") + " in coins the server says were " +
-            "already spent earlier (left over from an older wallet state, such as an old backup).",
+        if (b.refused > 0) Text("Not counted: " + street("${groupSats(b.refused)} sats") + " in coins the server refused in the " +
+            "last renewal as already spent (left over from an older wallet state, such as an old backup). RENEW tries them again.",
             style = MaterialTheme.typography.bodySmall, color = Warn)
         PocketRow("On-chain deposit", deposit,
             if (b.onchainPending > 0) street(groupSats(b.onchainPending)) + " unconfirmed · not in Ark yet" else "not in Ark yet", TextSoft)

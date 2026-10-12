@@ -644,7 +644,12 @@ object Ark {
      * renew the rest: one bad coin must not sink the round for all the others. Blocking.
      */
     fun renewSkippingRejected(ctx: Context, coins: List<String>): String {
-        var todo = coins.filter { it !in rejected(ctx) }.ifEmpty { coins }
+        // A coin set aside by an earlier failed round gets another chance on every RENEW: the
+        // server's "unusable inputs" can come from a round that failed for other reasons, and a
+        // coin wrongly set aside would stay out of the balance for good. If it really was spent,
+        // this round refuses it again and it is set aside again.
+        setRejected(ctx, emptySet())
+        var todo = coins
         val refused = LinkedHashSet<String>()
         repeat(3) {
             val known = history().filter { it.kind == "renewal" }.map { it.id }.toSet()
