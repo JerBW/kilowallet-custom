@@ -193,7 +193,11 @@ object Lightning {
      * each refresh until they take.
      */
     private suspend fun link(peers: Int) {
-        if (torOn && !towerAdded) runCatching { Lnd.addTower(TOWER, TOWER_HOST) }.onSuccess { towerAdded = true }
+        // The watchtower is added once, and only once the node is fully up: AddTower holds the
+        // tower client's lock while it reaches the tower over Tor, and LND's start waits on that
+        // same lock, so adding it during start (it was retried on every refresh) kept the node
+        // "still in the process of starting" for minutes, with no peer.
+        if (torOn && !towerAdded && (peers > 0 || linked)) addTowerOnce()
         // With no peer at all (a fresh or moved node, or one that lost its connection), reach
         // Kilombino's node again every half minute. The name is resolved here, not by LND: with
         // Tor on, LND resolves names through Tor, which fails until Tor is up. Its onion is tried too.
@@ -212,6 +216,14 @@ object Lightning {
             errors += "$t: ${r.exceptionOrNull()?.message}"
         }
         linkError = if (targets.isEmpty()) "could not resolve $host" else errors.joinToString("\n")
+    }
+
+    private suspend fun addTowerOnce() {
+        val prefs = appCtx?.getSharedPreferences(PREFS, Context.MODE_PRIVATE) ?: return
+        if (prefs.getBoolean("tower_added", false)) { towerAdded = true; return }
+        runCatching { Lnd.addTower(TOWER, TOWER_HOST) }.onSuccess {
+            towerAdded = true; prefs.edit().putBoolean("tower_added", true).apply()
+        }
     }
 
     /** Why the last attempt to reach Kilombino's node failed, to show under the channel. */
