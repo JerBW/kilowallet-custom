@@ -1,4 +1,5 @@
 import java.security.MessageDigest
+import java.util.zip.ZipFile
 import java.util.Properties
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
@@ -24,8 +25,8 @@ android {
         applicationId = "com.kilombino.pyblockwatch"
         minSdk = 26
         targetSdk = 35
-        versionCode = 99
-        versionName = "0.27.3"
+        versionCode = 100
+        versionName = "0.28.0-beta1"
         // One native library of ours: the Ark engine, arm64-v8a only, rebuilt from a pinned
         // commit and checked against ark-engine/ENGINE before every release build. On other
         // ABIs the wallet runs without Ark. See README-REPRODUCIBLE.md §1.
@@ -110,7 +111,30 @@ val verifyArkEngine by tasks.registering {
         check(others.isEmpty()) { "Only arm64-v8a may ship; remove ${others.joinToString { it.name }}" }
     }
 }
-tasks.matching { it.name == "preReleaseBuild" }.configureEach { dependsOn(verifyArkEngine) }
+// The same for the Lightning engine (LND as a gomobile library), pinned in lnd-engine/ENGINE.
+val verifyLndEngine by tasks.registering {
+    val pin = rootProject.file("lnd-engine/ENGINE")
+    val aar = file("libs/Lndmobile.aar")
+    inputs.files(pin)
+    doLast {
+        val expected = pin.readLines().first { it.startsWith("sha256-arm64=") }.substringAfter("=").trim()
+        check(aar.exists()) { "Missing $aar — build it with lnd-engine/build.sh." }
+        val actual = ZipFile(aar).use { z ->
+            val e = z.getEntry("jni/arm64-v8a/libgojni.so") ?: error("$aar has no arm64-v8a engine")
+            MessageDigest.getInstance("SHA-256").digest(z.getInputStream(e).readBytes())
+        }.joinToString("") { "%02x".format(it) }
+        check(actual == expected) { "Lightning engine hash $actual does not match the pinned $expected" }
+    }
+}
+tasks.matching { it.name == "preReleaseBuild" }.configureEach { dependsOn(verifyArkEngine, verifyLndEngine) }
+
+// The Lightning engine's AAR carries an x86_64 build for the emulator: debug builds keep it,
+// a release ships arm64 only, like the Ark engine.
+androidComponents {
+    onVariants(selector().withBuildType("release")) { v ->
+        v.packaging.jniLibs.excludes.addAll(listOf("lib/x86_64/libgojni.so", "lib/x86/libgojni.so", "lib/armeabi-v7a/libgojni.so"))
+    }
+}
 
 kotlin {
     compilerOptions { jvmTarget.set(JvmTarget.JVM_17) }
