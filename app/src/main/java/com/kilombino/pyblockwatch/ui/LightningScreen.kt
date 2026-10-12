@@ -242,7 +242,7 @@ private fun OpenSheet(accent: Color, onchain: Long, onDone: () -> Unit) {
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
         OutlinedTextField(fee, { fee = it.filter(Char::isDigit) }, label = { Text("Fee rate (sat/vB)") }, singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
-        Explain("Minimum 20,000 sats. Leave some sats on-chain: closing and fee bumps need them.")
+        Explain("Minimum 20,000 sats. Leave some sats on-chain: closing and fee bumps need them. The channel is private: it is not announced and nobody routes other people's payments through your phone.")
         Spacer(Modifier.height(6.dp))
         Button(enabled = !busy && (amount.toLongOrNull() ?: 0) >= 20_000, modifier = Modifier.fillMaxWidth(),
             colors = ButtonDefaults.buttonColors(containerColor = accent), onClick = {

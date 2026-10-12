@@ -209,7 +209,12 @@ object Lnd {
     }
 
     /** Opens a public channel of [sats] to [pubkey] from the node's on-chain coins; returns the funding txid. */
-    suspend fun openChannel(pubkey: String, sats: Long, satPerVbyte: Long, private: Boolean = false): String {
+    /**
+     * Channels from a phone are private (not announced): nobody routes through it, so a phone
+     * that goes off mid-payment never leaves someone else's payment hanging on it (which ends
+     * in a force close). Invoices then carry route hints so the channel can still receive.
+     */
+    suspend fun openChannel(pubkey: String, sats: Long, satPerVbyte: Long, private: Boolean = true): String {
         val m = call {
             Lndmobile.openChannelSync(Pb().string(3, pubkey).int(4, sats).int(1, satPerVbyte).bool(8, private).build(), it)
         }
@@ -226,7 +231,8 @@ object Lnd {
 
     suspend fun addInvoice(sats: Long, memo: String, expirySeconds: Long = 3600): String =
         call {
-            Lndmobile.addInvoice(Pb().string(1, memo).int(5, sats).int(11, expirySeconds).build(), it)
+            // private (15): route hints for the private channels, or nobody finds a way here.
+            Lndmobile.addInvoice(Pb().string(1, memo).int(5, sats).int(11, expirySeconds).bool(15, true).build(), it)
         }.string(2)
 
     /** Pays [invoice] (routerrpc.SendPaymentV2); returns the preimage, or throws with why it failed. */
