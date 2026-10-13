@@ -1127,7 +1127,7 @@ private fun RoundCard(
                 Text((if (st.terms.private) "🔒 " else "") + "${groupSats(st.terms.amount)} sats each" +
                     (if (st.terms.script == ScriptType.P2TR) " · Taproot" else ""),
                     style = MaterialTheme.typography.titleMedium, color = TextMain, modifier = Modifier.weight(1f))
-                Text((if (over) "" else "$step/$STEPS ") + if (open) "⌄" else "›",
+                Text((if (over) "" else "step $step/$STEPS ") + if (open) "⌄" else "›",
                     style = MaterialTheme.typography.titleMedium, color = color)
             }
             if (!over) RoundSteps(step, accent)

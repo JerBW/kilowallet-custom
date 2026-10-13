@@ -53,14 +53,15 @@ object RoundNotifications {
         val masked = ctx.getSharedPreferences("pyblockwatch", Context.MODE_PRIVATE).getBoolean("street_mode_default", true)
         val step = stepOf(st)
         val people = if (st.round.isNotEmpty()) st.round.size else st.seats.size
-        val stepText = if (step in 1 until STEPS) "Step $step of $STEPS · " else ""
+        // The people first: "Step 1 of 5" read as one person of five when the line was cut short.
+        // The bar of dots already says the step.
         val status = when (st.phase) {
-            PoolSession.Phase.JOINING -> "${stepText}Asking to join"
-            PoolSession.Phase.OPEN -> "${stepText}Waiting for people · $people/${st.terms.maxPeers}"
-            PoolSession.Phase.VOTING -> "${stepText}Closing vote · $people people"
-            PoolSession.Phase.CLOSING -> "${stepText}Collecting outputs"
-            PoolSession.Phase.SIGNING -> if (st.postedSig) "${stepText}Signed · waiting for the others" else "${stepText}Signing"
-            PoolSession.Phase.BROADCAST -> "${stepText}Sent · waiting for a block"
+            PoolSession.Phase.JOINING -> "Asking to join"
+            PoolSession.Phase.OPEN -> "$people/${st.terms.maxPeers} people · waiting for more"
+            PoolSession.Phase.VOTING -> "$people people · closing vote"
+            PoolSession.Phase.CLOSING -> "$people people · collecting outputs"
+            PoolSession.Phase.SIGNING -> if (st.postedSig) "$people people · signed, waiting for the others" else "$people people · signing"
+            PoolSession.Phase.BROADCAST -> "Sent · waiting for a block"
             PoolSession.Phase.CONFIRMED -> "Done · Confirmed"
             PoolSession.Phase.ABORTED -> "Cancelled"
             PoolSession.Phase.REJECTED -> "Refused"
@@ -83,7 +84,8 @@ object RoundNotifications {
         fun views(layout: Int, big: Boolean) = RemoteViews(ctx.packageName, layout).apply {
             // Folded there is room for one line: the amount with its step.
             setTextViewText(R.id.cj_title, if (big) title else title + when {
-                step in 1 until STEPS -> " · $step/$STEPS"
+                st.phase == PoolSession.Phase.OPEN -> " · $people/${st.terms.maxPeers} people"
+                step in 1 until STEPS -> " · step $step of $STEPS"
                 step == STEPS -> " · Confirmed"
                 else -> " · Cancelled"
             })
