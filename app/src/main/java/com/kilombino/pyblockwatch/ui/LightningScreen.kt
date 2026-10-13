@@ -410,7 +410,7 @@ private fun OpenSheet(accent: Color, onchain: Long, onTx: (String) -> Unit, onDo
         }
         if (custom) OutlinedTextField(node, { node = it.trim() }, label = { Text("pubkey@host:port") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         if (coins.isNotEmpty()) {
-            Text("Coins to use (none ticked: the node chooses). With an amount, the node takes only what it needs from the ticked ones; with the amount blank, all the ticked coins go into the channel.",
+            Text("Coins to use (none ticked: the node chooses). Every ticked coin is spent: with an amount, the channel gets it and the rest comes back to the node as one coin (they consolidate); with the amount blank, all of them go into the channel.",
                 style = MaterialTheme.typography.bodySmall, color = TextSoft)
             coins.forEach { u ->
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -449,8 +449,12 @@ private fun OpenSheet(accent: Color, onchain: Long, onTx: (String) -> Unit, onDo
                                 for (t in Lnd.resolved(listOf(host))) { val r = runCatching { Lnd.connect(pk, t) }; if (r.isSuccess) { ok = true; break }; last = r.exceptionOrNull() }
                                 if (!ok) throw last ?: IllegalStateException("could not reach the node")
                             }
-                            Lnd.openChannel(pk, amount.toLongOrNull() ?: 0, (fee.toLongOrNull() ?: 1).coerceAtLeast(1),
-                                coins = chosen.map { it.outpoint })
+                            val rate = (fee.toLongOrNull() ?: 1).coerceAtLeast(1)
+                            val amt = amount.toLongOrNull() ?: 0
+                            // Several coins ticked with an amount: every one of them is spent,
+                            // the channel gets the amount and the rest comes back as one coin.
+                            if (amt > 0 && chosen.size > 1) Lnd.openChannelAllCoins(pk, amt, rate, chosen.map { it.outpoint })
+                            else Lnd.openChannel(pk, amt, rate, coins = chosen.map { it.outpoint })
                         }
                     }.onSuccess { msg = "Opening: usable once it confirms (the peer decides how many blocks, usually 1 to 3). Save a new backup file (Settings) so it includes this channel." to true; Lightning.refresh(); onTx(it) }
                      .onFailure { msg = (it.message ?: "could not open the channel") to false }

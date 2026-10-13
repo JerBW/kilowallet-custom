@@ -2,6 +2,7 @@ package com.kilombino.pyblockwatch.ln
 
 import android.content.Context
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.launch
 import lndmobile.Callback
 import lndmobile.Lndmobile
 import lndmobile.RecvStream
@@ -286,6 +287,54 @@ object Lnd {
         // ChannelPoint: funding_txid_bytes (1, little-endian) or funding_txid_str (2).
         val str = m.string(2)
         return if (str.isNotEmpty()) str else m.bytes(1).reversedArray().joinToString("") { "%02x".format(it) }
+    }
+
+    /**
+     * Opens a channel of [sats] spending ALL of [coins] ("txid:vout"), the change back as one
+     * coin: LND's own selection would take only what it needs from a list, so the funding
+     * transaction is built here (PSBT funding: LND gives the channel address, FundPsbt spends
+     * exactly these coins, LND checks it, the wallet signs, LND publishes). On any failure the
+     * pending channel is cancelled and the coins released. Returns the funding txid.
+     */
+    suspend fun openChannelAllCoins(pubkey: String, sats: Long, satPerVbyte: Long, coins: List<String>): String {
+        val pendingId = ByteArray(32).also { java.security.SecureRandom().nextBytes(it) }
+        val leases = java.util.Collections.synchronizedList(ArrayList<PbMsg>())
+        val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO)
+        suspend fun cleanUp() {
+            runCatching { call { Lndmobile.fundingStateStep(Pb().msg(2, Pb().bytes(1, pendingId)).build(), it) } }
+            leases.forEach { l -> runCatching { call { Lndmobile.walletKitReleaseOutput(Pb().bytes(1, l.bytes(1)).bytes(2, l.bytes(2)).build(), it) } } }
+        }
+        return try {
+            suspendCancellableCoroutine { cont ->
+                val req = Pb().string(3, pubkey).int(4, sats).bool(8, true)
+                    .msg(14, Pb().msg(2, Pb().bytes(1, pendingId)))
+                var funding = false
+                stream({ Lndmobile.openChannel(req.build(), it) }, onMsg = { u ->
+                    if (u.has(5) && !funding) {
+                        funding = true
+                        val f = u.msg(5)
+                        scope.launch {
+                            runCatching {
+                                val tmpl = Pb()
+                                coins.forEach { c -> tmpl.msg(1, Pb().string(2, c.substringBefore(':')).int(3, c.substringAfter(':').toInt())) }
+                                tmpl.mapEntry(2, f.string(1), f.long(2))
+                                val funded = call {
+                                    Lndmobile.walletKitFundPsbt(Pb().msg(2, tmpl).int(4, satPerVbyte).int(6, 1).int(8, 1).build(), it)
+                                }
+                                leases.addAll(funded.msgs(3))
+                                val psbt = funded.bytes(1)
+                                call { Lndmobile.fundingStateStep(Pb().msg(3, Pb().bytes(1, psbt).bytes(2, pendingId)).build(), it) }
+                                val signed = call { Lndmobile.walletKitFinalizePsbt(Pb().bytes(1, psbt).build(), it) }.bytes(1)
+                                call { Lndmobile.fundingStateStep(Pb().msg(4, Pb().bytes(1, signed).bytes(2, pendingId)).build(), it) }
+                            }.onFailure { e -> if (cont.isActive) cont.resumeWithException(e) }
+                        }
+                    } else if (u.has(1)) {
+                        val txid = u.msg(1).bytes(1).reversedArray().joinToString("") { "%02x".format(it) }
+                        if (cont.isActive) cont.resume(txid)
+                    }
+                }, onEnd = { e -> if (cont.isActive) cont.resumeWithException(e ?: LndError("the channel open ended without an answer")) })
+            }
+        } catch (e: Exception) { cleanUp(); throw e }
     }
 
     /** Sends the node's on-chain coins to [address]; [all] sweeps everything. Returns the txid. */
