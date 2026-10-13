@@ -26,15 +26,21 @@ import kotlin.math.roundToLong
  * The XBT price widget (formerly the separate "XBT Widget" app), now part of the wallet.
  *
  * No WorkManager on purpose: the wallet keeps its dependency list minimal for the
- * reproducible build. Refreshes come from three places — Android's own 30-minute update,
- * the wallet's background watcher (every 5 min, if enabled) and the refresh button —
- * and all of them go through [MarketFeed], which decides whether the server may be asked.
+ * reproducible build. Refreshes come from an alarm every [EVERY_MS] (shown as a countdown
+ * next to the refresh button), Android's own 30-minute update, the wallet's background
+ * watcher and the refresh button — all through [MarketFeed], which decides whether the
+ * server may be asked.
  */
 class XbtWidget : AppWidgetProvider() {
 
     override fun onUpdate(ctx: Context, mgr: AppWidgetManager, ids: IntArray) {
+        scheduleNext(ctx)
         renderAll(ctx)
         refreshAsync(ctx, force = false)
+    }
+
+    override fun onDisabled(ctx: Context) {
+        alarm(ctx)?.cancel(tickIntent(ctx))
     }
 
     override fun onAppWidgetOptionsChanged(ctx: Context, mgr: AppWidgetManager, id: Int, opts: Bundle) {
@@ -44,6 +50,7 @@ class XbtWidget : AppWidgetProvider() {
     override fun onReceive(ctx: Context, intent: Intent) {
         super.onReceive(ctx, intent)
         if (intent.action == ACTION_REFRESH) refreshAsync(ctx, force = true)
+        if (intent.action == ACTION_TICK) { scheduleNext(ctx); refreshAsync(ctx, force = false) }
     }
 
     private fun refreshAsync(ctx: Context, force: Boolean) {
@@ -68,6 +75,25 @@ class XbtWidget : AppWidgetProvider() {
 
     companion object {
         const val ACTION_REFRESH = "com.kilombino.pyblockwatch.widget.REFRESH"
+        private const val ACTION_TICK = "com.kilombino.pyblockwatch.widget.TICK"
+        private const val EVERY_MS = 5 * 60_000L
+
+        /** When the next automatic refresh is due (elapsed-realtime clock), for the countdown. */
+        @Volatile private var nextTickElapsed = 0L
+
+        private fun alarm(ctx: Context) = ctx.getSystemService(android.app.AlarmManager::class.java)
+
+        private fun tickIntent(ctx: Context): PendingIntent = PendingIntent.getBroadcast(
+            ctx, 7, Intent(ctx, XbtWidget::class.java).setAction(ACTION_TICK),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+
+        /** The next automatic refresh in [EVERY_MS]; allowed while the phone dozes (Android may delay it). */
+        fun scheduleNext(ctx: Context) {
+            if (!hasWidgets(ctx)) return
+            val at = android.os.SystemClock.elapsedRealtime() + EVERY_MS
+            nextTickElapsed = at
+            alarm(ctx)?.setAndAllowWhileIdle(android.app.AlarmManager.ELAPSED_REALTIME, at, tickIntent(ctx))
+        }
 
         private const val MIN_SPIN_MS = 1500L
 
@@ -127,6 +153,11 @@ class XbtWidget : AppWidgetProvider() {
                 ctx, 2, Intent(ctx, com.kilombino.pyblockwatch.ui.ConverterActivity::class.java)
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
+            if (nextTickElapsed > android.os.SystemClock.elapsedRealtime()) {
+                v.setChronometer(R.id.countdown, nextTickElapsed, null, true)
+                v.setChronometerCountDown(R.id.countdown, true)
+                v.setViewVisibility(R.id.countdown, View.VISIBLE)
+            } else v.setViewVisibility(R.id.countdown, View.GONE)
             v.setOnClickPendingIntent(R.id.refresh, PendingIntent.getBroadcast(
                 ctx, 1, Intent(ctx, XbtWidget::class.java).setAction(ACTION_REFRESH),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))

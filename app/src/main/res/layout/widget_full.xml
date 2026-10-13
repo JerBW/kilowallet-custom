@@ -28,6 +28,16 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1" />
+        <!-- Time to the next automatic refresh (every 5 minutes), counting down. -->
+        <Chronometer
+            android:id="@+id/countdown"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="2dp"
+            android:countDown="true"
+            android:alpha="0.7"
+            android:textColor="@color/widget_ink"
+            android:textSize="11sp" />
         <!-- Big touch target (48 dp) around a small arrow; the negative margins keep the
              header row as tall as before. While refreshing, the arrow spins. -->
         <FrameLayout

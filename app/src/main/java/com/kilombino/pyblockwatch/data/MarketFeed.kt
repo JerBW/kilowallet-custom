@@ -61,7 +61,7 @@ object MarketFeed {
     private const val KEY_BACKOFF = "backoff_min"
     private const val KEY_LAST_TRY = "last_try"
     private const val KEY_LIMITED_UNTIL = "limited_until"
-    private const val MIN_POLL_MIN = 15L
+    private const val MIN_POLL_MIN = 5L
     private const val MAX_BACKOFF_MIN = 6 * 60L
     private const val STALE_MS = 45 * 60_000L
 
