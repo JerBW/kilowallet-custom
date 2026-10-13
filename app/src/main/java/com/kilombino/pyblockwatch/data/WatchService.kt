@@ -93,6 +93,10 @@ class WatchService : Service() {
                     ArkWatch.evaluate(this@WatchService, notifier)
                 }
             }
+            // Lightning: payments arriving at the node's FUND addresses, from the explorer (no
+            // need for the node to run).
+            if (com.kilombino.pyblockwatch.ln.Lightning.enabled(this@WatchService))
+                runCatching { com.kilombino.pyblockwatch.ln.Lightning.checkIncomingNow(this@WatchService) }
             // A coinjoin round still running whose service died: start it again.
             runCatching {
                 if (com.kilombino.pyblockwatch.coinjoin.CoinjoinHub.hasActive(this@WatchService))

@@ -112,6 +112,9 @@ object Lightning {
         private set
     @Volatile private var lastIncoming = 0L
 
+    /** The same look from the background watcher, whatever the last one was. */
+    fun checkIncomingNow(ctx: Context) { lastIncoming = 0L; checkIncoming(ctx.applicationContext) }
+
     private fun checkIncoming(app: Context) {
         val now = System.currentTimeMillis()
         if (now - lastIncoming < 60_000) return
