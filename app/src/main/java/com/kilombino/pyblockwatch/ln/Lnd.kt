@@ -306,7 +306,10 @@ object Lnd {
         }
         return try {
             suspendCancellableCoroutine { cont ->
-                val req = Pb().string(3, pubkey).int(4, sats).bool(8, true)
+                // The streaming OpenChannel wants the key as bytes (node_pubkey, 2); only the
+                // synchronous one still reads the old hex field.
+                val pk = pubkey.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+                val req = Pb().bytes(2, pk).string(3, pubkey).int(4, sats).bool(8, true)
                     .msg(14, Pb().msg(2, Pb().bytes(1, pendingId)))
                 var funding = false
                 stream({ Lndmobile.openChannel(req.build(), it) }, onMsg = { u ->
