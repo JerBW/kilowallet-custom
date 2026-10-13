@@ -78,7 +78,8 @@ fun CoinjoinScreen(vm: WalletViewModel, accent: Color) {
     // 0 JOIN, 1 IN PROGRESS, 2 HISTORY: a round going opens on IN PROGRESS.
     var tab by androidx.compose.runtime.saveable.rememberSaveable {
         mutableStateOf(if (CoinjoinHub.states.value.any { it.phase !in setOf(PoolSession.Phase.CONFIRMED,
-                PoolSession.Phase.ABORTED, PoolSession.Phase.REJECTED) }) 1 else 0)
+                PoolSession.Phase.ABORTED, PoolSession.Phase.REJECTED) } ||
+            com.kilombino.pyblockwatch.coinjoin.PerfectCoin.hasWaiting(ctx)) 1 else 0)
     }
     // Test pools (from 1 000 sats) were for the betas; the release starts at 10 000.
     val testPools = false
@@ -190,6 +191,7 @@ fun CoinjoinScreen(vm: WalletViewModel, accent: Color) {
                 singleLine = true, textStyle = MaterialTheme.typography.bodyMedium, modifier = Modifier.fillMaxWidth())
         }
         CoinPicker(vm, accent, "Join · ${groupSats(t.amount)} sats${poolKind(t)}", t.amount, t.feeRate, t.script, t.maxInputs,
+            exactFor = WalletViewModel.ExactFor(t.id, joinPassword.ifEmpty { null }, null),
             onCancel = { joining = null; joinPassword = "" },
             onPicked = { u ->
                 if (t.private && joinPassword.isEmpty()) { message = "Type the pool's password first."; return@CoinPicker }
@@ -226,7 +228,10 @@ fun CoinjoinScreen(vm: WalletViewModel, accent: Color) {
         open = unfolded[st.poolId] ?: needsMe(st), onToggle = { unfolded[st.poolId] = !(unfolded[st.poolId] ?: needsMe(st)) }) { message = it }
 
     if (tab == 1) {
-        if (active.isEmpty()) Explain("No rounds going. Join a pool, or open your own, in JOIN.")
+        val perfect by com.kilombino.pyblockwatch.coinjoin.PerfectCoin.waiting.collectAsState()
+        LaunchedEffect(rev / 1_000_000) { com.kilombino.pyblockwatch.coinjoin.PerfectCoin.load(ctx) }
+        if (active.isEmpty() && perfect.isEmpty()) Explain("No rounds going. Join a pool, or open your own, in JOIN.")
+        perfect.forEach { w -> PerfectCoinCard(w, accent, vm) }
         active.forEach { card(it) }
         return
     }
@@ -355,6 +360,8 @@ private fun unlockAndPick(
 private fun CoinPicker(
     vm: WalletViewModel, accent: Color, title: String, amount: Long, feeRate: Double,
     type: ScriptType, maxInputs: Int,
+    /** The pool a perfect coin made here is for: it joins (or opens) it by itself once confirmed. */
+    exactFor: WalletViewModel.ExactFor,
     onCancel: () -> Unit, onPicked: (List<Scanner.SpendableUtxo>) -> Unit,
 ) {
     val tag = if (type == ScriptType.P2TR) ScriptType.P2TR else null
@@ -368,24 +375,6 @@ private fun CoinPicker(
     val exact = amount + CoinjoinTx.feeShare(feeRate, false, 1, type)
     var making by remember { mutableStateOf(false) }
     var offerPerfect by remember { mutableStateOf(false) }
-    // The exact coin was just sent: wait for its first confirmation, then pick it and go on by
-    // ourselves (the next step is the usual fingerprint for the seat).
-    var waitingExact by remember { mutableStateOf(false) }
-    LaunchedEffect(waitingExact) {
-        if (!waitingExact) return@LaunchedEffect
-        while (waitingExact) {
-            kotlinx.coroutines.delay(30_000)
-            vm.refresh(com.kilombino.pyblockwatch.chain.Chain.BLAKE2B)
-            kotlinx.coroutines.delay(5_000)
-            val found = runCatching { vm.coinjoinCoins(tag) }.getOrNull()?.firstOrNull { it.value == exact }
-            if (found != null) {
-                waitingExact = false
-                coins = runCatching { vm.coinjoinCoins(tag) }.getOrNull()
-                chosen.clear(); chosen.add(found)
-                onPicked(listOf(found))
-            }
-        }
-    }
     val total = chosen.sumOf { it.value }
     val change = if (chosen.isEmpty()) null else CoinjoinTx.change(total, amount, feeRate, chosen.size, type)
     val fee = if (change == null) 0L else total - amount - change
@@ -409,17 +398,8 @@ private fun CoinPicker(
         SectionLabel(title, accent)
         Spacer(Modifier.height(8.dp))
         if (making) {
-            ExactCoinPanel(vm, accent, exact, tag) { sent -> making = false; reload++; if (sent) waitingExact = true }
+            ExactCoinPanel(vm, accent, exact, tag, exactFor) { sent -> making = false; reload++; if (sent) onCancel() }
             return@Panel
-        }
-        if (waitingExact) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                PulseDot(accent); Spacer(Modifier.width(8.dp))
-                Text("Waiting for the exact coin's first confirmation (about 10 minutes). Leave this open: it is picked and the pool goes on by itself.",
-                    style = MaterialTheme.typography.bodySmall, color = TextSoft)
-            }
-            TextButton(onClick = { waitingExact = false }) { Text("stop waiting", color = TextFaint) }
-            Spacer(Modifier.height(8.dp))
         }
         Explain(if (maxInputs > 1)
             "Pick up to $maxInputs confirmed $kind coins that together make at least ${groupSats(amount)} sats plus your fee. " +
@@ -529,7 +509,9 @@ private fun CreatePool(
         else -> null
     }
     if (pickCoin && error == null) {
-        CoinPicker(vm, accent, "Your coins for the pool", amount!!, rate!!, type, maxInputs!!, onCancel = { pickCoin = false }) { u ->
+        val exactFor = WalletViewModel.ExactFor(null, null, org.json.JSONObject().put("amount", amount!!).put("feeRate", rate!!)
+            .put("maxPeers", peers!!).put("hours", hours!!).put("minPeers", minPeers!!).put("password", password).put("maxInputs", maxInputs!!))
+        CoinPicker(vm, accent, "Your coins for the pool", amount, rate, type, maxInputs, exactFor, onCancel = { pickCoin = false }) { u ->
             onCreate(amount, rate, minPeers!!, peers!!, hours!!, password, maxInputs, u)
         }
         return
@@ -829,7 +811,8 @@ private fun askBatteryFree(ctx: android.content.Context) {
  * coin (it is what the round will pay), it says nothing about how busy the mempool is now.
  */
 @Composable
-private fun ExactCoinPanel(vm: WalletViewModel, accent: Color, exact: Long, tag: ScriptType?, onDone: (sent: Boolean) -> Unit) {
+private fun ExactCoinPanel(vm: WalletViewModel, accent: Color, exact: Long, tag: ScriptType?, exactFor: WalletViewModel.ExactFor,
+                           onDone: (sent: Boolean) -> Unit) {
     val activity = LocalContext.current as FragmentActivity
     val state by vm.state.collectAsState()
     var sources by remember { mutableStateOf<List<Scanner.SpendableUtxo>?>(null) }
@@ -900,7 +883,7 @@ private fun ExactCoinPanel(vm: WalletViewModel, accent: Color, exact: Long, tag:
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = { onDone(false) }, colors = ButtonDefaults.buttonColors(containerColor = PanelSoft, contentColor = TextSoft),
                     shape = RoundedCornerShape(12.dp), modifier = Modifier.weight(1f)) { Text("CANCEL") }
-                Button(onClick = { rate?.let { vm.prepareExactCoin(exact, it, tag, picked.toList()); started = true } },
+                Button(onClick = { rate?.let { vm.exactFor = exactFor; vm.prepareExactCoin(exact, it, tag, picked.toList()); started = true } },
                     enabled = rate != null && sources != null && (picked.isEmpty() || picked.sumOf { it.value } >= exact),
                     colors = ButtonDefaults.buttonColors(containerColor = accent, contentColor = Ink),
                     shape = RoundedCornerShape(12.dp), modifier = Modifier.weight(1f)) {
@@ -933,8 +916,42 @@ private fun ExactCoinPanel(vm: WalletViewModel, accent: Color, exact: Long, tag:
                 }
             }
             is SendPhase.Sent -> {
-                Text("Sent ✓ — the pool goes ahead by itself once it has one confirmation.", color = Good, style = MaterialTheme.typography.bodySmall)
-                LaunchedEffect(Unit) { kotlinx.coroutines.delay(1_500); vm.resetSend(); onDone(true) }
+                // What went out, and where the pool goes from here; CLOSE goes to the BTC tab.
+                val uri = LocalUriHandler.current
+                val copier = rememberCopier()
+                Text("Sent ✓", color = Good, style = MaterialTheme.typography.bodySmall)
+                AlertDialog(
+                    onDismissRequest = {},
+                    title = { Text("Perfect coin sent") },
+                    text = {
+                        Column {
+                            Text("${groupSats(exact)} sats to a fresh address of yours.", style = MaterialTheme.typography.bodyMedium, color = TextMain)
+                            Spacer(Modifier.height(8.dp))
+                            Text(p.txid, style = MaterialTheme.typography.bodySmall, color = TextSoft,
+                                modifier = Modifier.clickable { copier.copy(p.txid) })
+                            Spacer(Modifier.height(8.dp))
+                            Text((if (exactFor.create != null) "At its first confirmation (about 10 minutes) your pool opens by itself"
+                                  else "At its first confirmation (about 10 minutes) it joins the pool by itself") +
+                                " and the round runs on its own: you can close the app. Follow it in COINJOIN → IN PROGRESS.",
+                                style = MaterialTheme.typography.bodySmall, color = TextSoft)
+                            Row {
+                                TextButton(onClick = { copier.copy(p.txid) }) {
+                                    Text(if (copier.copied) "COPIED ✓" else "COPY TXID", color = if (copier.copied) Good else accent)
+                                }
+                                TextButton(onClick = { runCatching { uri.openUri("${vm.explorerFor(com.kilombino.pyblockwatch.chain.Chain.BLAKE2B)}/tx/${p.txid}") } }) {
+                                    Text("EXPLORER", color = accent)
+                                }
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            vm.resetSend(); onDone(true)
+                            com.kilombino.pyblockwatch.data.OpenTab.flow.value = com.kilombino.pyblockwatch.data.OpenTab.BTC
+                        }) { Text("CLOSE", color = accent) }
+                    },
+                    containerColor = PanelBg, titleContentColor = TextMain, textContentColor = TextSoft,
+                )
             }
             is SendPhase.Failed -> {
                 Text(p.message, color = Bad, style = MaterialTheme.typography.bodySmall)
@@ -1142,6 +1159,31 @@ private fun CoinjoinTabs(tab: Int, inProgress: Int, accent: Color, onTab: (Int) 
                         modifier = Modifier.clip(androidx.compose.foundation.shape.CircleShape)
                             .background(if (on) Ink else accent).padding(horizontal = 6.dp, vertical = 1.dp))
                 }
+            }
+        }
+    }
+}
+
+/** A perfect coin sent and waiting for its first confirmation; then its pool goes on by itself. */
+@Composable
+private fun PerfectCoinCard(w: com.kilombino.pyblockwatch.coinjoin.PerfectCoin.Waiting, accent: Color, vm: WalletViewModel) {
+    val ctx = LocalContext.current
+    val uri = LocalUriHandler.current
+    Panel(accent = accent) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("${groupSats(w.value)} sats · perfect coin", style = MaterialTheme.typography.titleMedium, color = TextMain, modifier = Modifier.weight(1f))
+            PulseDot(accent)
+        }
+        RoundSteps(0, accent)
+        Text("Waiting for its first confirmation", style = MaterialTheme.typography.bodyMedium, color = accent)
+        Text(if (w.create != null) "Then your pool opens by itself and runs on its own." else "Then it joins the pool by itself and the round runs on its own.",
+            style = MaterialTheme.typography.bodySmall, color = TextSoft)
+        Row {
+            TextButton(onClick = { runCatching { uri.openUri("${vm.explorerFor(com.kilombino.pyblockwatch.chain.Chain.BLAKE2B)}/tx/${w.txid}") } }) {
+                Text("explorer", color = accent, style = MaterialTheme.typography.bodySmall)
+            }
+            TextButton(onClick = { com.kilombino.pyblockwatch.coinjoin.PerfectCoin.cancel(ctx, w.txid) }) {
+                Text("don't join, keep the coin", color = TextFaint, style = MaterialTheme.typography.bodySmall)
             }
         }
     }

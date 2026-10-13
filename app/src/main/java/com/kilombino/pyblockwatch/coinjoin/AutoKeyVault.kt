@@ -60,7 +60,8 @@ object AutoKeyVault {
     /** Drops the keys of every pool not in [keep]. */
     fun keepOnly(ctx: Context, keep: Set<String>) {
         val p = prefs(ctx)
-        val gone = p.all.keys.filter { it !in keep }
+        // A perfect coin's key ("exact:…") waits for its pool and is not a round's: left alone.
+        val gone = p.all.keys.filter { it !in keep && !it.startsWith("exact:") }
         if (gone.isNotEmpty()) p.edit().apply { gone.forEach { remove(it) } }.apply()
     }
 }

@@ -26,7 +26,18 @@ class CoinjoinService : Service() {
         // The cards first: a round that ended while the app was away still gets its last one.
         runCatching { RoundNotifications.update(this, first()?.poolId) }
         if (!CoinjoinHub.hasActive(this)) { stopSelf(); return START_NOT_STICKY }
-        if (!started) { started = true; CoinjoinHub.startAll(this) }
+        if (!started) {
+            started = true; CoinjoinHub.startAll(this)
+            // Perfect coins waiting: looked at every minute, joined on their own once confirmed.
+            val app = applicationContext
+            Thread {
+                while (started) {
+                    runCatching { if (PerfectCoin.hasWaiting(app)) PerfectCoin.check(app) }
+                    runCatching { refresh(app) }
+                    Thread.sleep(60_000)
+                }
+            }.apply { isDaemon = true }.start()
+        }
         return START_STICKY
     }
 

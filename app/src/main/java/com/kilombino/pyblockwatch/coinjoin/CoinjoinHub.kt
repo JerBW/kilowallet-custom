@@ -100,7 +100,12 @@ object CoinjoinHub {
     }
 
     /** True while some pool still needs this phone online. */
-    fun hasActive(ctx: Context): Boolean { load(ctx); return synchronized(this) { sessions.values.any { !it.done || it.state.phase == PoolSession.Phase.BROADCAST } } }
+    fun hasActive(ctx: Context): Boolean {
+        load(ctx)
+        // A perfect coin waiting for its confirmation keeps the service up too: it joins on its own.
+        return synchronized(this) { sessions.values.any { !it.done || it.state.phase == PoolSession.Phase.BROADCAST } } ||
+            PerfectCoin.hasWaiting(ctx)
+    }
 
     /** Coins already promised to a pool that is not over: a normal send must leave them alone. */
     fun lockedOutpoints(ctx: Context): Set<String> {
@@ -360,6 +365,9 @@ object CoinjoinHub {
 
     fun openApp(ctx: Context): PendingIntent =
         com.kilombino.pyblockwatch.data.OpenTab.pending(ctx, com.kilombino.pyblockwatch.data.OpenTab.COINJOIN)
+
+    /** An alert from outside a round (the perfect coin). */
+    fun notifyPublic(ctx: Context, title: String, text: String) = notify(ctx, 4300 + (title.hashCode() and 0xff), title, text)
 
     private fun notify(ctx: Context, id: Int, title: String, text: String) {
         ensureChannel(ctx)
