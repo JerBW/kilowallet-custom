@@ -331,7 +331,14 @@ private fun FundSheet(accent: Color, onTx: (String) -> Unit) {
         runCatching { withContext(Dispatchers.IO) { Lnd.newAddress() } }.onSuccess { addr = it }.onFailure { err = it.message }
         while (true) {
             coins = runCatching { withContext(Dispatchers.IO) { Lnd.utxos() } }.getOrDefault(coins)
-            txs = runCatching { withContext(Dispatchers.IO) { Lnd.transactions() } }.getOrDefault(txs)
+            txs = runCatching {
+                withContext(Dispatchers.IO) {
+                    val list = Lnd.transactions()
+                    // Those LND cannot follow (they pay elsewhere): ask the explorer.
+                    val ext = Lnd.explorerConfirmations(list.filter { it.confirmations == 0 }.map { it.txid })
+                    list.map { t -> ext[t.txid]?.takeIf { it > 0 }?.let { t.copy(confirmations = it) } ?: t }
+                }
+            }.getOrDefault(txs)
             kotlinx.coroutines.delay(15_000)
         }
     }
@@ -1173,6 +1180,7 @@ private fun txKind(t: Lnd.ChainTx): String {
     val l = t.label.lowercase()
     return when {
         "openchannel" in l -> "channel opened"
+        ("closechannel" in l || "close" in l) && t.sats == 0L -> "channel closed · sent to another address"
         "closechannel" in l || "close" in l -> "channel closed"
         "sweep" in l -> "swept back"
         t.sats >= 0 -> "received"

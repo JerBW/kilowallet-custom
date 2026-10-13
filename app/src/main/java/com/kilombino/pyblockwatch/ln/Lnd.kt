@@ -346,6 +346,27 @@ object Lnd {
             ChainTx(it.string(1), it.long(2), it.int(3), it.long(6), it.long(7), it.string(10))
         }.sortedByDescending { it.time }
 
+    /**
+     * Confirmations of [txids] from the chain explorer. A light wallet only follows transactions
+     * that pay its own addresses, so one that pays elsewhere (a channel closed to the BTC
+     * wallet) stays "unconfirmed" in LND for good; the explorer knows better.
+     */
+    fun explorerConfirmations(txids: List<String>): Map<String, Int> {
+        if (txids.isEmpty()) return emptyMap()
+        fun get(path: String): String {
+            val c = (java.net.URL("https://mempool.kilombino.com/api$path").openConnection() as java.net.HttpURLConnection)
+                .apply { connectTimeout = 10_000; readTimeout = 10_000 }
+            return try { c.inputStream.bufferedReader().use { it.readText() } } finally { c.disconnect() }
+        }
+        val tip = runCatching { get("/blocks/tip/height").trim().toInt() }.getOrNull() ?: return emptyMap()
+        return txids.associateWith { id ->
+            runCatching {
+                val o = org.json.JSONObject(get("/tx/$id/status"))
+                if (o.optBoolean("confirmed")) tip - o.optInt("block_height") + 1 else 0
+            }.getOrDefault(0)
+        }
+    }
+
     /** One of the node's on-chain coins. [outpoint] is "txid:vout". */
     data class Utxo(val outpoint: String, val address: String, val sats: Long, val confirmations: Long)
 
