@@ -962,6 +962,7 @@ fun QrImage(text: String, sizeDp: Int) {
  */
 @androidx.compose.runtime.Composable
 fun ReceiveSheet(vm: WalletViewModel, accent: Color, onClose: () -> Unit) {
+    val copier = rememberCopier()
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
     var index by remember { mutableStateOf(vm.nextReceiveIndex()) }
     val pair = remember(index) { vm.receiveAddress(index) }
@@ -988,25 +989,24 @@ fun ReceiveSheet(vm: WalletViewModel, accent: Color, onClose: () -> Unit) {
                 Modifier.fillMaxWidth(),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
+                // A tap on the QR or the address copies it, and says so.
                 Box(
                     Modifier.clip(RoundedCornerShape(10.dp))
-                        .background(Color.White).padding(10.dp),
+                        .background(Color.White).clickable { copier.copy(address) }.padding(10.dp),
                 ) { QrImage(address, 200) }
                 Spacer(Modifier.height(10.dp))
-                SelectionContainer {
-                    Text(address, style = MaterialTheme.typography.bodyMedium,
-                         fontFamily = FontFamily.Monospace, color = TextMain)
-                }
+                Text(address, style = MaterialTheme.typography.bodyMedium,
+                     fontFamily = FontFamily.Monospace, color = TextMain, modifier = Modifier.clickable { copier.copy(address) })
                 Spacer(Modifier.height(4.dp))
                 Text("unused · $path", style = MaterialTheme.typography.bodySmall, color = TextFaint)
             }
             Spacer(Modifier.height(10.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
-                    onClick = { clipboard.setText(androidx.compose.ui.text.AnnotatedString(address)) },
-                    colors = ButtonDefaults.buttonColors(containerColor = accent, contentColor = Ink),
+                    onClick = { copier.copy(address) },
+                    colors = ButtonDefaults.buttonColors(containerColor = if (copier.copied) Good else accent, contentColor = Ink),
                     shape = RoundedCornerShape(12.dp), modifier = Modifier.weight(1f),
-                ) { Text("COPY", style = MaterialTheme.typography.titleMedium) }
+                ) { Text(if (copier.copied) "COPIED ✓" else "COPY", style = MaterialTheme.typography.titleMedium) }
                 Button(
                     onClick = { index += 1 },
                     colors = ButtonDefaults.buttonColors(containerColor = PanelSoft, contentColor = accent),

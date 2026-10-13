@@ -420,10 +420,11 @@ private fun FundSheet(accent: Color, onTx: (String) -> Unit) {
         Explain("Channels are opened from the node's own on-chain coins. Send to this address from the BTC tab (or anywhere), then open a channel once it confirms.")
         Spacer(Modifier.height(8.dp))
         addr?.let { a ->
-            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) { QrImage("bitcoin:$a", 200) }
+            val copier = rememberCopier()
+            Column(Modifier.fillMaxWidth().clickable { copier.copy(a) }, horizontalAlignment = Alignment.CenterHorizontally) { QrImage("bitcoin:$a", 200) }
             Spacer(Modifier.height(6.dp))
-            Text(a, style = MaterialTheme.typography.bodySmall, color = TextMain)
-            TextButton(onClick = { clip.setText(AnnotatedString(a)) }) { Text("COPY", color = accent) }
+            Text(a, style = MaterialTheme.typography.bodySmall, color = TextMain, modifier = Modifier.clickable { copier.copy(a) })
+            TextButton(onClick = { copier.copy(a) }) { Text(if (copier.copied) "COPIED ✓" else "COPY", color = if (copier.copied) Good else accent) }
         }
         err?.let { Text(it, color = Bad, style = MaterialTheme.typography.bodySmall) }
     }
@@ -566,9 +567,10 @@ private fun ReceiveLn(accent: Color, ready: Boolean) {
         err?.let { Text(it, color = Bad, style = MaterialTheme.typography.bodySmall) }
         invoice?.let { inv ->
             Spacer(Modifier.height(8.dp))
-            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) { QrImage(inv.uppercase(), 240) }
-            Text(inv.take(40) + "…", style = MaterialTheme.typography.bodySmall, color = TextSoft)
-            TextButton(onClick = { clip.setText(AnnotatedString(inv)) }) { Text("COPY", color = accent) }
+            val copier = rememberCopier()
+            Column(Modifier.fillMaxWidth().clickable { copier.copy(inv) }, horizontalAlignment = Alignment.CenterHorizontally) { QrImage(inv.uppercase(), 240) }
+            Text(inv.take(40) + "…", style = MaterialTheme.typography.bodySmall, color = TextSoft, modifier = Modifier.clickable { copier.copy(inv) })
+            TextButton(onClick = { copier.copy(inv) }) { Text(if (copier.copied) "COPIED ✓" else "COPY", color = if (copier.copied) Good else accent) }
             Explain("Keep the app open until it is paid. Valid for one hour.")
         }
     }

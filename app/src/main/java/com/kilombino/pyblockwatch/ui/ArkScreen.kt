@@ -481,11 +481,12 @@ private fun ArkReceiveSheet(
                 Text(st, style = MaterialTheme.typography.bodySmall, color = col)
             }
             Spacer(Modifier.height(6.dp))
-            if (!paid) QrImage(if (label.contains("Lightning")) text.uppercase() else text, 230)
+            val copier = rememberCopier()
+            if (!paid) androidx.compose.foundation.layout.Box(Modifier.clickable { copier.copy(text) }) { QrImage(if (label.contains("Lightning")) text.uppercase() else text, 230) }
             Spacer(Modifier.height(6.dp))
-            SelectionContainer { Text(text, style = MaterialTheme.typography.bodySmall, color = TextMain) }
+            Text(text, style = MaterialTheme.typography.bodySmall, color = TextMain, modifier = Modifier.clickable { copier.copy(text) })
             Row {
-                TextButton(onClick = { clip.setText(AnnotatedString(text)) }) { Text("COPY", color = accent) }
+                TextButton(onClick = { copier.copy(text) }) { Text(if (copier.copied) "COPIED ✓" else "COPY", color = if (copier.copied) Good else accent) }
                 if (label.contains("BOLT12")) TextButton(onClick = {
                     run("Disabling the offer…" to { Ark.disableOffer(); "" }) { shown = null }
                 }) { Text("DISABLE", color = TextSoft) }

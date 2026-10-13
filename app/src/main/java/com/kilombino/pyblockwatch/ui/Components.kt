@@ -321,3 +321,17 @@ fun switchColors(accent: Color) = androidx.compose.material3.SwitchDefaults.colo
     checkedThumbColor = Color.White, checkedTrackColor = accent, checkedBorderColor = accent,
     uncheckedThumbColor = TextFaint, uncheckedTrackColor = PanelSoft, uncheckedBorderColor = TextFaint,
 )
+
+/**
+ * Copying with a word back: [copy] puts the text on the clipboard and [copied] stays true for
+ * two seconds, so a COPY button (or a tapped address) can say "COPIED ✓".
+ */
+class Copier(val copied: Boolean, val copy: (String) -> Unit)
+
+@Composable
+fun rememberCopier(): Copier {
+    val clip = androidx.compose.ui.platform.LocalClipboardManager.current
+    var copied by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(0L) }
+    androidx.compose.runtime.LaunchedEffect(copied) { if (copied > 0) { kotlinx.coroutines.delay(2_000); copied = 0 } }
+    return Copier(copied > 0) { t -> clip.setText(androidx.compose.ui.text.AnnotatedString(t)); copied = System.currentTimeMillis() }
+}
