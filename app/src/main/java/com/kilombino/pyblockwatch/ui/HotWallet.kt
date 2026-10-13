@@ -790,7 +790,7 @@ fun SendSheet(vm: WalletViewModel, accent: Color, onClose: () -> Unit) {
                     Switch(
                         checked = coinControl,
                         onCheckedChange = { coinControl = it; if (it) vm.loadUtxos() },
-                        colors = SwitchDefaults.colors(checkedThumbColor = accent),
+                        colors = switchColors(accent),
                     )
                 }
                 if (coinControl) {

@@ -614,12 +614,9 @@ private fun MyPoolCard(
             " · fee ${groupSats(st.seat.inputValue - st.terms.amount - st.seat.changeValue)}",
             style = MaterialTheme.typography.bodySmall, color = TextFaint)
         if (CoinjoinHub.isAuto(st.poolId) && st.phase in setOf(PoolSession.Phase.OPEN, PoolSession.Phase.VOTING,
-                PoolSession.Phase.CLOSING, PoolSession.Phase.SIGNING)) Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("On its own: it accepts closing and signs once your outputs check out",
-                style = MaterialTheme.typography.bodySmall, color = Good, modifier = Modifier.weight(1f))
-            TextButton(onClick = { CoinjoinHub.stopAuto(st.poolId); onMessage("This round now asks you at each step.") }) {
-                Text("stop", color = TextSoft, style = MaterialTheme.typography.bodySmall)
-            }
+                PoolSession.Phase.CLOSING, PoolSession.Phase.SIGNING)) {
+            // The switch above says it all; here only a quiet mark.
+            Text("on its own ✓", style = MaterialTheme.typography.labelSmall, color = Good)
         } else if (st.phase in setOf(PoolSession.Phase.OPEN, PoolSession.Phase.VOTING, PoolSession.Phase.CLOSING,
                 PoolSession.Phase.SIGNING) && !st.postedSig) {
             // A round joined while asking (or before this existed): one fingerprint now, nothing later.
@@ -759,8 +756,13 @@ internal fun CoinjoinAutoSetting(accent: Color) {
                     "the keys of the round's coins are kept encrypted on this phone until the round ends."
                     else "Off: you accept closing and sign yourself, with your fingerprint, at each step.")
             }
-            androidx.compose.material3.Switch(checked = on, onCheckedChange = { on = it; CoinjoinHub.setAutoDefault(ctx, it) },
-                colors = androidx.compose.material3.SwitchDefaults.colors(checkedThumbColor = accent))
+            // Turning it on also asks Android to let the wallet run in the background, which a
+            // round on its own needs with the phone put away.
+            androidx.compose.material3.Switch(checked = on, onCheckedChange = {
+                on = it; CoinjoinHub.setAutoDefault(ctx, it)
+                if (it && !batteryFree(ctx)) askBatteryFree(ctx)
+            },
+                colors = switchColors(accent))
         }
         // A round on its own has to keep going with the screen off and the app closed; Android's
         // battery saver may pause it otherwise. Offered here, never asked for elsewhere.
@@ -770,7 +772,7 @@ internal fun CoinjoinAutoSetting(accent: Color) {
             val o = androidx.lifecycle.LifecycleEventObserver { _, e -> if (e == androidx.lifecycle.Lifecycle.Event.ON_RESUME) free = batteryFree(ctx) }
             lifecycle.lifecycle.addObserver(o); onDispose { lifecycle.lifecycle.removeObserver(o) }
         }
-        if (!free) {
+        if (on && !free) {
             Spacer(Modifier.height(8.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Explain("Android may pause the wallet in the background. Let it run, so you can put the phone away.", Modifier.weight(1f))

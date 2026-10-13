@@ -201,9 +201,12 @@ private enum class LnSheet { None, Fund, Open, Receive, Pay }
 
 @Composable
 private fun LnNode(s: Lightning.Status.Running, accent: Color, settings: Boolean, vm: WalletViewModel) {
-    var closing by remember { mutableStateOf<Lnd.Channel?>(null) }
+    var closing by remember { mutableStateOf<List<Lnd.Channel>?>(null) }
+    // Several at once: tick the channels, then close them together.
+    var selecting by remember { mutableStateOf(false) }
+    var selected by remember { mutableStateOf<Set<String>>(emptySet()) }
     var showTx by remember { mutableStateOf<Pair<String, String>?>(null) }
-    closing?.let { c -> CloseChannelDialog(c, accent, vm, onTx = { showTx = "Closing transaction" to it }) { closing = null } }
+    closing?.let { cs -> CloseChannelDialog(cs, accent, vm, onTx = { showTx = "Closing transaction" to it }) { closing = null; selecting = false; selected = emptySet() } }
     showTx?.let { (t, id) -> TxDialog(t, id, accent, vm) { showTx = null } }
     val book = remember(s) { ledger(s) }
     var sheet by remember { mutableStateOf(LnSheet.None) }
@@ -274,21 +277,41 @@ private fun LnNode(s: Lightning.Status.Running, accent: Color, settings: Boolean
         s.channels.forEach { c ->
             Spacer(Modifier.height(6.dp))
             val name = c.peerAlias.ifBlank { c.peer.take(16) + "…" }
+            if (selecting) Row(verticalAlignment = Alignment.CenterVertically) {
+                androidx.compose.material3.Checkbox(checked = c.point in selected, onCheckedChange = { on ->
+                    selected = if (on) selected + c.point else selected - c.point
+                })
+                Text(name + "  " + street(groupSats(c.capacity)) + " sats", style = MaterialTheme.typography.bodySmall, color = TextMain)
+            } else
             Text(name + "  " + street(groupSats(c.capacity)) + " sats", style = MaterialTheme.typography.bodySmall, color = TextMain)
             Text((if (c.active) "active" else "offline") + " · yours " + street(groupSats(c.local)) + " · can receive " + street(groupSats(c.remote)),
                 style = MaterialTheme.typography.bodySmall, color = if (c.active) TextSoft else Warn)
-            if (!c.active && c.peer == Lightning.KILOMBINO_NODE) Lightning.linkError?.let {
-                Text("Cannot reach it: $it", style = MaterialTheme.typography.labelSmall, color = TextFaint)
-            }
+            if (!c.active && c.peer == Lightning.KILOMBINO_NODE && c == s.channels.first { it.peer == Lightning.KILOMBINO_NODE })
+                Lightning.linkError?.let { e ->
+                    // While LND finishes starting every attempt fails the same way: that is a wait, not an error.
+                    val starting = e.lines().all { "still in the process of starting" in it || "starting" in it }
+                    Text(if (starting) "The node is still starting: it connects by itself in a minute or two."
+                         else "Cannot reach it yet; it keeps trying. " + e.lines().first().substringAfter("desc = "),
+                        style = MaterialTheme.typography.labelSmall, color = TextFaint)
+                }
             Row {
                 TextButton(onClick = { showTx = "Funding transaction" to c.point.substringBefore(':') },
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)) {
                     Text("VIEW FUNDING TX", color = accent, style = MaterialTheme.typography.labelSmall)
                 }
                 Spacer(Modifier.width(16.dp))
-                TextButton(onClick = { closing = c }, contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)) {
+                TextButton(onClick = { closing = listOf(c) }, contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)) {
                     Text("CLOSE CHANNEL", color = accent, style = MaterialTheme.typography.labelSmall)
                 }
+            }
+        }
+        if (s.channels.size > 1) Row(verticalAlignment = Alignment.CenterVertically) {
+            if (!selecting) TextButton(onClick = { selecting = true }) { Text("CLOSE SEVERAL…", color = accent, style = MaterialTheme.typography.labelSmall) }
+            else {
+                TextButton(enabled = selected.isNotEmpty(), onClick = { closing = s.channels.filter { it.point in selected } }) {
+                    Text("CLOSE ${selected.size} CHANNEL" + (if (selected.size == 1) "" else "S"), color = accent, style = MaterialTheme.typography.labelSmall)
+                }
+                TextButton(onClick = { selecting = false; selected = emptySet() }) { Text("CANCEL", color = TextFaint, style = MaterialTheme.typography.labelSmall) }
             }
         }
         s.closing.forEach { c ->
@@ -1087,9 +1110,12 @@ private fun Movements(accent: Color, moves: List<LnEntry>, title: String) {
  * pasted address; or forced, for a peer that is gone (the money then waits the channel's delay).
  */
 @Composable
-private fun CloseChannelDialog(c: Lnd.Channel, accent: Color, vm: WalletViewModel, onTx: (String) -> Unit, onDone: () -> Unit) {
+private fun CloseChannelDialog(cs: List<Lnd.Channel>, accent: Color, vm: WalletViewModel, onTx: (String) -> Unit, onDone: () -> Unit) {
     val scope = rememberCoroutineScope()
-    val btc = remember { runCatching { vm.receiveAddress(vm.nextReceiveIndex())?.first }.getOrNull() }
+    val c = cs.first()
+    // One fresh address of the BTC wallet per channel, so the closes do not share one.
+    val btcAll = remember { runCatching { val i = vm.nextReceiveIndex(); cs.indices.mapNotNull { k -> vm.receiveAddress(i + k)?.first } }.getOrDefault(emptyList()) }
+    val btc = btcAll.firstOrNull()
     var dest by remember { mutableStateOf(if (btc != null) 0 else 1) }   // 0 BTC wallet, 1 node, 2 pasted
     var pasted by remember { mutableStateOf("") }
     var fee by remember { mutableStateOf("1") }
@@ -1097,10 +1123,11 @@ private fun CloseChannelDialog(c: Lnd.Channel, accent: Color, vm: WalletViewMode
     var busy by remember { mutableStateOf(false) }
     var msg by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
     AlertDialog(onDismissRequest = { if (!busy) onDone() },
-        title = { Text("Close the channel with ${c.peerAlias.ifBlank { c.peer.take(12) + "…" }}?") },
+        title = { Text(if (cs.size > 1) "Close ${cs.size} channels?" else "Close the channel with ${c.peerAlias.ifBlank { c.peer.take(12) + "…" }}?") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.verticalScroll(androidx.compose.foundation.rememberScrollState())) {
-                Text("Your " + groupSats(c.local) + " sats come back on-chain, minus the closing fee.", style = MaterialTheme.typography.bodySmall)
+                Text("Your " + groupSats(cs.sumOf { it.local }) + " sats come back on-chain, minus the closing fee" + (if (cs.size > 1) "s (one transaction per channel)." else "."),
+                    style = MaterialTheme.typography.bodySmall)
                 if (!force) {
                     Text("Send them to:", style = MaterialTheme.typography.bodySmall)
                     if (btc != null) Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1135,7 +1162,21 @@ private fun CloseChannelDialog(c: Lnd.Channel, accent: Color, vm: WalletViewMode
                 busy = true; msg = null
                 val to = when { force -> null; dest == 0 -> btc; dest == 2 -> pasted; else -> null }
                 scope.launch {
-                    runCatching { withContext(Dispatchers.IO) { Lnd.closeChannel(c.point, force, to, (fee.toLongOrNull() ?: 1).coerceAtLeast(1)) } }
+                    runCatching {
+                        withContext(Dispatchers.IO) {
+                            val rate = (fee.toLongOrNull() ?: 1).coerceAtLeast(1)
+                            var last = ""
+                            val failed = ArrayList<String>()
+                            cs.forEachIndexed { k, ch ->
+                                val addr = if (!force && dest == 0) btcAll.getOrNull(k) ?: to else to
+                                runCatching { Lnd.closeChannel(ch.point, force, addr, rate) }
+                                    .onSuccess { last = it }.onFailure { failed += (ch.peerAlias.ifBlank { ch.peer.take(10) }) + ": " + it.message }
+                            }
+                            if (last.isEmpty()) throw IllegalStateException(failed.joinToString("; "))
+                            if (failed.isNotEmpty()) msg = ("Closed some; not: " + failed.joinToString("; ")) to false
+                            last
+                        }
+                    }
                         .onSuccess { Lightning.refresh(); onDone(); onTx(it) }
                         .onFailure { msg = (it.message ?: "could not close") to false }
                     busy = false

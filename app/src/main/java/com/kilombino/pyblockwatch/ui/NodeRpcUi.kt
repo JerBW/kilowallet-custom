@@ -77,7 +77,7 @@ fun RpcNodePanel(vm: WalletViewModel, accent: androidx.compose.ui.graphics.Color
                     else "Off: the Electrum server above is used.")
             }
             Switch(checked = on, onCheckedChange = { on = it; vm.setUseRpc(it); onSaved() },
-                colors = SwitchDefaults.colors(checkedThumbColor = accent))
+                colors = switchColors(accent))
         }
         OutlinedTextField(value = url, onValueChange = { url = it.trim(); msg = null },
             label = { Text("the RPC address, port included", style = MaterialTheme.typography.bodySmall) },

@@ -310,3 +310,14 @@ fun FlowOpenWhileShown() {
         onDispose { openFlows.intValue-- }
     }
 }
+
+/**
+ * Switch colours that tell on from off at a glance: on, a white knob on the accent; off, a
+ * grey knob on a dark track with a grey edge. (A knob in the accent on an accent track, as
+ * before, hid whether it was on.)
+ */
+@Composable
+fun switchColors(accent: Color) = androidx.compose.material3.SwitchDefaults.colors(
+    checkedThumbColor = Color.White, checkedTrackColor = accent, checkedBorderColor = accent,
+    uncheckedThumbColor = TextFaint, uncheckedTrackColor = PanelSoft, uncheckedBorderColor = TextFaint,
+)

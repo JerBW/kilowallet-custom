@@ -946,7 +946,7 @@ internal fun SettingsPanel(
             Switch(
                 checked = state.notificationsEnabled,
                 onCheckedChange = onToggleNotifications,
-                colors = SwitchDefaults.colors(checkedThumbColor = accent),
+                colors = switchColors(accent),
             )
         }
 
@@ -1004,7 +1004,7 @@ internal fun SettingsPanel(
                 }
                 val askNotif = rememberNotificationPermission()
                 Switch(checked = cjNotify, onCheckedChange = { cjNotify = it; vm.setCoinjoinNotify(it); if (it) askNotif() },
-                    colors = SwitchDefaults.colors(checkedThumbColor = accent))
+                    colors = switchColors(accent))
             }
             if (cjOn) { Spacer(Modifier.height(10.dp)); CoinjoinAutoSetting(accent) }
             Spacer(Modifier.height(14.dp))
@@ -1189,7 +1189,7 @@ internal fun SettingsPanel(
                 Switch(checked = updates, onCheckedChange = {
                     updates = it
                     activity.getSharedPreferences("pyblockwatch", android.content.Context.MODE_PRIVATE).edit().putBoolean("check_updates", it).apply()
-                }, colors = SwitchDefaults.colors(checkedThumbColor = accent))
+                }, colors = switchColors(accent))
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
@@ -1198,7 +1198,7 @@ internal fun SettingsPanel(
                         "with the eye. Off: they always show (turning it off asks for your fingerprint).")
                 }
                 Switch(checked = StreetMode.byDefault, onCheckedChange = { StreetMode.setByDefault(activity, it) },
-                    colors = SwitchDefaults.colors(checkedThumbColor = accent))
+                    colors = switchColors(accent))
             }
             // Asks now, even about a version once answered NOT NOW.
             TextButton(onClick = {
