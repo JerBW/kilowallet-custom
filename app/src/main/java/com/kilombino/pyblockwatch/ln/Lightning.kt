@@ -96,6 +96,17 @@ object Lightning {
 
     fun markOff() { _status.value = Status.Off }
 
+    /** The routing fee a payment may cost at most: [feePercent] of it, never under [feeMinSats]. */
+    fun feeLimit(ctx: Context, sats: Long): Long {
+        val p = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val pct = p.getFloat("fee_pct", 1f); val min = p.getLong("fee_min", 10L)
+        return maxOf(min, (sats * pct / 100.0).toLong())
+    }
+    fun feePercent(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getFloat("fee_pct", 1f)
+    fun feeMinSats(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getLong("fee_min", 10L)
+    fun setFeeLimit(ctx: Context, pct: Float, min: Long) =
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putFloat("fee_pct", pct).putLong("fee_min", min).apply()
+
     /** Stops and deletes an empty node (the screen checks it holds nothing). */
     suspend fun deleteNode(ctx: Context) {
         val app = ctx.applicationContext

@@ -237,19 +237,19 @@ object Lnd {
         }
 
     /** A channel being closed: [note] says how far (waiting for the close, or locked until a block). */
-    data class Closing(val peer: String, val capacity: Long, val limbo: Long, val note: String)
+    data class Closing(val peer: String, val capacity: Long, val limbo: Long, val note: String, val txid: String)
 
     suspend fun pendingClose(): List<Closing> {
         val m = call { Lndmobile.pendingChannels(ByteArray(0), it) }
         val waiting = m.msgs(5).map { w ->
             val ch = w.msg(1)
-            Closing(ch.string(1), ch.long(3), w.long(2), "closing · waiting for the closing transaction to confirm")
+            Closing(ch.string(1), ch.long(3), w.long(2), "closing · waiting for the closing transaction to confirm", w.string(4))
         }
         val forced = m.msgs(4).map { f ->
             val ch = f.msg(1)
             val left = f.int(5)
             Closing(ch.string(1), ch.long(3), f.long(3),
-                if (left > 0) "force closed · your sats unlock in $left blocks" else "force closed · sweeping your sats")
+                if (left > 0) "force closed · your sats unlock in $left blocks" else "force closed · sweeping your sats", f.string(2))
         }
         return waiting + forced
     }

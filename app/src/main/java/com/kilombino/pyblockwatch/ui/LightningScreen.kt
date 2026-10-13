@@ -196,7 +196,9 @@ private enum class LnSheet { None, Fund, Open, Receive, Pay }
 @Composable
 private fun LnNode(s: Lightning.Status.Running, accent: Color, settings: Boolean, vm: WalletViewModel) {
     var closing by remember { mutableStateOf<Lnd.Channel?>(null) }
-    closing?.let { c -> CloseChannelDialog(c, accent, vm) { closing = null } }
+    var showTx by remember { mutableStateOf<Pair<String, String>?>(null) }
+    closing?.let { c -> CloseChannelDialog(c, accent, vm, onTx = { showTx = "Closing transaction" to it }) { closing = null } }
+    showTx?.let { (t, id) -> TxDialog(t, id, accent, vm) { showTx = null } }
     val book = remember(s) { ledger(s) }
     var sheet by remember { mutableStateOf(LnSheet.None) }
     val i = s.info
@@ -215,13 +217,19 @@ private fun LnNode(s: Lightning.Status.Running, accent: Color, settings: Boolean
             StreetEye(TextSoft)
         }
         Spacer(Modifier.height(10.dp))
-        Text(street("${groupSats(b?.channels ?: 0)} sats"), style = MaterialTheme.typography.headlineSmall, color = accent)
-        Text("in channels, can be paid with", style = MaterialTheme.typography.bodySmall, color = TextFaint)
-        Spacer(Modifier.height(6.dp))
-        Text("On-chain in the node: " + street(groupSats(b?.onchainConfirmed ?: 0)) + " sats" +
-            ((b?.onchainUnconfirmed ?: 0).takeIf { it > 0 }?.let { " (+" + street(groupSats(it)) + " unconfirmed)" } ?: ""),
-            style = MaterialTheme.typography.bodySmall, color = TextSoft)
-        if ((b?.pendingOpen ?: 0) > 0) Text("Opening: " + street(groupSats(b!!.pendingOpen)) + " sats", style = MaterialTheme.typography.bodySmall, color = Warn)
+        // The node holds two kinds of money: what is in channels (Lightning, spent with an
+        // invoice) and its own on-chain coins (spent with PAY → on-chain or used to open channels).
+        val ln = b?.channels ?: 0
+        val chain = (b?.onchainConfirmed ?: 0) + (b?.onchainUnconfirmed ?: 0)
+        val closingSats = s.closing.sumOf { it.limbo }
+        Text(street("${groupSats(ln + chain + closingSats + (b?.pendingOpen ?: 0))} sats"), style = MaterialTheme.typography.headlineSmall, color = accent)
+        Text("in the Lightning node", style = MaterialTheme.typography.bodySmall, color = TextFaint)
+        Spacer(Modifier.height(8.dp))
+        BalanceLine("⚡ Lightning (in channels)", ln, TextMain)
+        BalanceLine("⛓ On-chain in the node", b?.onchainConfirmed ?: 0, TextSoft,
+            (b?.onchainUnconfirmed ?: 0).takeIf { it > 0 }?.let { "+" + street(groupSats(it)) + " unconfirmed" })
+        if ((b?.pendingOpen ?: 0) > 0) BalanceLine("⏳ Opening channels", b!!.pendingOpen, Warn)
+        if (closingSats > 0) BalanceLine("⏳ Closing channels", closingSats, Warn)
     }
 
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -265,18 +273,30 @@ private fun LnNode(s: Lightning.Status.Running, accent: Color, settings: Boolean
             if (!c.active && c.peer == Lightning.KILOMBINO_NODE) Lightning.linkError?.let {
                 Text("Cannot reach it: $it", style = MaterialTheme.typography.labelSmall, color = TextFaint)
             }
-            TextButton(onClick = { closing = c }, contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)) {
-                Text("CLOSE CHANNEL", color = accent, style = MaterialTheme.typography.labelSmall)
+            Row {
+                TextButton(onClick = { showTx = "Funding transaction" to c.point.substringBefore(':') },
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)) {
+                    Text("VIEW FUNDING TX", color = accent, style = MaterialTheme.typography.labelSmall)
+                }
+                Spacer(Modifier.width(16.dp))
+                TextButton(onClick = { closing = c }, contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)) {
+                    Text("CLOSE CHANNEL", color = accent, style = MaterialTheme.typography.labelSmall)
+                }
             }
         }
         s.closing.forEach { c ->
             Spacer(Modifier.height(6.dp))
             Text(c.peer.take(16) + "…  " + street(groupSats(c.capacity)) + " sats", style = MaterialTheme.typography.bodySmall, color = TextMain)
             Text(c.note + " · yours " + street(groupSats(c.limbo)), style = MaterialTheme.typography.bodySmall, color = Warn)
+            if (c.txid.isNotEmpty()) TextButton(onClick = { showTx = "Closing transaction" to c.txid },
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)) {
+                Text("VIEW CLOSING TX", color = accent, style = MaterialTheme.typography.labelSmall)
+            }
         }
     }
 
     if (settings) {
+        FeeLimitPanel(accent)
         ConnectPeer(accent)
         LnLog(accent)
         SaveChannelBackup(accent)
@@ -426,8 +446,19 @@ private fun PayLn(accent: Color, scanned: String?, onDone: () -> Unit) {
     var req by remember { mutableStateOf<Lnd.PayReq?>(null) }
     var busy by remember { mutableStateOf(false) }
     var msg by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
+    var paidSats by remember { mutableStateOf<Long?>(null) }
+    LaunchedEffect(paidSats) { if (paidSats != null) { kotlinx.coroutines.delay(4_000); paidSats = null } }
+    val ctx = LocalContext.current
     Panel(accent = accent) {
         SectionLabel("Pay a Lightning invoice", accent)
+        androidx.compose.animation.AnimatedVisibility(visible = paidSats != null,
+            enter = androidx.compose.animation.scaleIn() + androidx.compose.animation.fadeIn(),
+            exit = androidx.compose.animation.fadeOut()) {
+            Column(Modifier.fillMaxWidth().padding(vertical = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("⚡📤", style = MaterialTheme.typography.displayLarge)
+                Text("Paid! " + street(groupSats(paidSats ?: 0)) + " sats", style = MaterialTheme.typography.titleLarge, color = Good)
+            }
+        }
         val clip = LocalClipboardManager.current
         OutlinedTextField(text, { text = it.trim(); req = null; msg = null }, label = { Text("Lightning invoice (lnbc…)") },
             modifier = Modifier.fillMaxWidth(), maxLines = 4)
@@ -442,14 +473,14 @@ private fun PayLn(accent: Color, scanned: String?, onDone: () -> Unit) {
         msg?.let { (t, ok) -> Text(t, color = if (ok) Good else Bad, style = MaterialTheme.typography.bodySmall) }
     }
     req?.let { r ->
-        val feeLimit = maxOf(10L, r.sats / 100)
+        val feeLimit = Lightning.feeLimit(ctx, r.sats)
         AlertDialog(onDismissRequest = { if (!busy) req = null },
             title = { Text("Pay ${groupSats(r.sats)} sats?") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     if (r.description.isNotBlank()) Text("“${r.description}”", style = MaterialTheme.typography.bodySmall)
                     Text("To ${r.destination.take(20)}…", style = MaterialTheme.typography.bodySmall, color = TextSoft)
-                    Text("Routing fee at most ${groupSats(feeLimit)} sats.", style = MaterialTheme.typography.bodySmall, color = TextSoft)
+                    Text("Routing fee at most ${groupSats(feeLimit)} sats (change it in settings).", style = MaterialTheme.typography.bodySmall, color = TextSoft)
                     if (r.sats == 0L) Text("This invoice has no amount: it is not supported yet.", color = Bad, style = MaterialTheme.typography.bodySmall)
                 }
             },
@@ -458,7 +489,7 @@ private fun PayLn(accent: Color, scanned: String?, onDone: () -> Unit) {
                     busy = true
                     scope.launch {
                         runCatching { withContext(Dispatchers.IO) { Lnd.pay(text.removePrefix("lightning:"), feeLimit) } }
-                            .onSuccess { msg = "Paid." to true; text = ""; Lightning.refresh() }
+                            .onSuccess { paidSats = r.sats; msg = null; text = ""; Lightning.refresh() }
                             .onFailure { msg = ("Not paid: " + (it.message ?: "failed")) to false }
                         busy = false; req = null
                     }
@@ -875,6 +906,15 @@ private fun LnLog(accent: Color) {
 }
 
 /** One movement in the channels: [delta] in sats (+ received, − paid with its fee), [left] after it. */
+@Composable
+private fun BalanceLine(label: String, sats: Long, color: Color, note: String? = null) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(label, style = MaterialTheme.typography.bodySmall, color = color, modifier = Modifier.weight(1f))
+        Text(street(groupSats(sats)) + " sats", style = MaterialTheme.typography.bodySmall, color = color)
+    }
+    note?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = TextFaint) }
+}
+
 private data class LnEntry(val time: Long, val delta: Long, val label: String, val left: Long)
 
 /**
@@ -917,7 +957,7 @@ private fun Movements(accent: Color, moves: List<LnEntry>, title: String) {
  * pasted address; or forced, for a peer that is gone (the money then waits the channel's delay).
  */
 @Composable
-private fun CloseChannelDialog(c: Lnd.Channel, accent: Color, vm: WalletViewModel, onDone: () -> Unit) {
+private fun CloseChannelDialog(c: Lnd.Channel, accent: Color, vm: WalletViewModel, onTx: (String) -> Unit, onDone: () -> Unit) {
     val scope = rememberCoroutineScope()
     val btc = remember { runCatching { vm.receiveAddress(vm.nextReceiveIndex())?.first }.getOrNull() }
     var dest by remember { mutableStateOf(if (btc != null) 0 else 1) }   // 0 BTC wallet, 1 node, 2 pasted
@@ -966,11 +1006,63 @@ private fun CloseChannelDialog(c: Lnd.Channel, accent: Color, vm: WalletViewMode
                 val to = when { force -> null; dest == 0 -> btc; dest == 2 -> pasted; else -> null }
                 scope.launch {
                     runCatching { withContext(Dispatchers.IO) { Lnd.closeChannel(c.point, force, to, (fee.toLongOrNull() ?: 1).coerceAtLeast(1)) } }
-                        .onSuccess { msg = "Closing: transaction ${it.take(16)}…. It shows under Channels until it confirms." to true; Lightning.refresh() }
+                        .onSuccess { Lightning.refresh(); onDone(); onTx(it) }
                         .onFailure { msg = (it.message ?: "could not close") to false }
                     busy = false
                 }
             }) { Text(if (busy) "CLOSING…" else if (force) "FORCE CLOSE" else "CLOSE", color = if (force) Bad else accent) }
         },
         dismissButton = { if (msg?.second != true) TextButton(enabled = !busy, onClick = onDone) { Text("CANCEL") } })
+}
+
+/** A transaction of the node: its id to copy, and the explorer to look at it. */
+@Composable
+private fun TxDialog(title: String, txid: String, accent: Color, vm: WalletViewModel, onDone: () -> Unit) {
+    val clip = LocalClipboardManager.current
+    val uri = androidx.compose.ui.platform.LocalUriHandler.current
+    val explorer = vm.explorerFor(com.kilombino.pyblockwatch.chain.Chain.BLAKE2B)
+    AlertDialog(onDismissRequest = onDone,
+        title = { Text(title) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                androidx.compose.foundation.text.selection.SelectionContainer {
+                    Text(txid, style = MaterialTheme.typography.bodySmall)
+                }
+                Text("It shows on the explorer while it waits for its confirmations.", style = MaterialTheme.typography.bodySmall, color = TextSoft)
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { runCatching { uri.openUri("$explorer/tx/$txid") } }) { Text("OPEN IN EXPLORER", color = accent) }
+        },
+        dismissButton = {
+            Row {
+                TextButton(onClick = { clip.setText(AnnotatedString(txid)) }) { Text("COPY", color = accent) }
+                TextButton(onClick = onDone) { Text("CLOSE") }
+            }
+        })
+}
+
+/** How much a Lightning payment may cost in routing fees, at most. */
+@Composable
+private fun FeeLimitPanel(accent: Color) {
+    val ctx = LocalContext.current
+    var pct by remember { mutableStateOf(Lightning.feePercent(ctx)) }
+    var min by remember { mutableStateOf(Lightning.feeMinSats(ctx).toString()) }
+    Panel(accent = accent) {
+        SectionLabel("Routing fee limit", accent)
+        Spacer(Modifier.height(6.dp))
+        Explain("The most a payment may cost in routing fees: a share of what you pay, never less than the minimum. A payment that would cost more is not sent. Example: " +
+            groupSats(Lightning.feeLimit(ctx, 10_000)) + " sats on 10,000.")
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            listOf(0.5f, 1f, 2f, 3f, 5f).forEach { v ->
+                val on = kotlin.math.abs(pct - v) < 0.01f
+                TextButton(onClick = { pct = v; Lightning.setFeeLimit(ctx, v, min.toLongOrNull() ?: 10L) }) {
+                    Text((if (v % 1f == 0f) v.toInt().toString() else v.toString()) + "%", color = if (on) accent else TextFaint)
+                }
+            }
+        }
+        OutlinedTextField(min, { v -> min = v.filter(Char::isDigit); Lightning.setFeeLimit(ctx, pct, min.toLongOrNull() ?: 0L) },
+            label = { Text("Minimum (sats)") }, singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
+    }
 }
