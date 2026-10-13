@@ -68,6 +68,12 @@ class Notifier(private val context: Context, private val titlePrefix: String = "
         post(idFor(chain, "found", ""), "${chain.display}: balance detected", text, tabFor(chain))
     }
 
+    /** Coins arriving at the Lightning node's on-chain wallet (FUND). */
+    fun lightningIn(amount: Long, txid: String, confirmed: Boolean) =
+        post(("ln:" + (if (confirmed) "conf" else "mem") + ":" + txid).hashCode(),
+             if (confirmed) "⚡ Lightning node: payment confirmed" else "⚡ Lightning node: incoming payment",
+             "+${sats(amount)} sats on-chain in the Lightning node" + (if (confirmed) " (1 conf)" else " (0 conf)"), OpenTab.LIGHTNING)
+
     fun mempoolIn(chain: Chain, amount: Long, txid: String) =
         post(idFor(chain, "mem", txid), "New incoming payment in the mempool",
              "${chain.display} · +${sats(amount)} sats (0 conf)", tabFor(chain))

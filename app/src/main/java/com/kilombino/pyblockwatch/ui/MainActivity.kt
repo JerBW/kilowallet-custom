@@ -476,11 +476,15 @@ private fun WalletScreen(state: UiState, vm: WalletViewModel, onToggleNotificati
         com.kilombino.pyblockwatch.data.OpenTab.flow.value = null
         when (t) {
             com.kilombino.pyblockwatch.data.OpenTab.COINJOIN -> {
-                cjTab = true; arkTab = false
+                cjTab = true; arkTab = false; lnTab = false
                 if (state.selected != Chain.BLAKE2B) vm.select(Chain.BLAKE2B)
                 com.kilombino.pyblockwatch.coinjoin.CoinjoinHub.requestRefresh()
             }
-            com.kilombino.pyblockwatch.data.OpenTab.ARK -> { arkTab = true; cjTab = false; arkPull++ }
+            com.kilombino.pyblockwatch.data.OpenTab.ARK -> { arkTab = true; cjTab = false; lnTab = false; arkPull++ }
+            com.kilombino.pyblockwatch.data.OpenTab.LIGHTNING -> {
+                lnTab = true; arkTab = false; cjTab = false
+                if (state.selected != Chain.BLAKE2B) vm.select(Chain.BLAKE2B)
+            }
             com.kilombino.pyblockwatch.data.OpenTab.SPAMCOIN -> {
                 arkTab = false; cjTab = false
                 if (state.selected != Chain.SHA256) vm.acceptSpamchain() else vm.refresh(Chain.SHA256)

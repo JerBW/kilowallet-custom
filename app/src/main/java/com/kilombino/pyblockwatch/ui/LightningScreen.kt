@@ -322,13 +322,15 @@ private fun LnNode(s: Lightning.Status.Running, accent: Color, settings: Boolean
 
 @Composable
 private fun FundSheet(accent: Color, onTx: (String) -> Unit) {
+    val ctxF = LocalContext.current
     val clip = LocalClipboardManager.current
     var addr by remember { mutableStateOf<String?>(null) }
     var err by remember { mutableStateOf<String?>(null) }
     var coins by remember { mutableStateOf<List<Lnd.Utxo>>(emptyList()) }
     var txs by remember { mutableStateOf<List<Lnd.ChainTx>>(emptyList()) }
     LaunchedEffect(Unit) {
-        runCatching { withContext(Dispatchers.IO) { Lnd.newAddress() } }.onSuccess { addr = it }.onFailure { err = it.message }
+        runCatching { withContext(Dispatchers.IO) { Lnd.newAddress() } }
+            .onSuccess { addr = it; Lightning.rememberFundAddress(ctxF, it) }.onFailure { err = it.message }
         while (true) {
             coins = runCatching { withContext(Dispatchers.IO) { Lnd.utxos() } }.getOrDefault(coins)
             txs = runCatching {
@@ -336,7 +338,16 @@ private fun FundSheet(accent: Color, onTx: (String) -> Unit) {
                     val list = Lnd.transactions()
                     // Those LND cannot follow (they pay elsewhere): ask the explorer.
                     val ext = Lnd.explorerConfirmations(list.filter { it.confirmations == 0 }.map { it.txid })
-                    list.map { t -> ext[t.txid]?.takeIf { it > 0 }?.let { t.copy(confirmations = it) } ?: t }
+                    // A close paid to another address moves nothing in the node's wallet: show
+                    // what left the channel, as a payment out.
+                    val settled = runCatching { Lnd.closedSettled() }.getOrDefault(emptyMap())
+                    val known = list.map { it.txid }.toSet()
+                    // Payments the explorer sees and the node not yet (it learns of them only in a block).
+                    Lightning.incoming.filter { it.txid !in known } + list.map { t ->
+                        var u = ext[t.txid]?.takeIf { it > 0 }?.let { t.copy(confirmations = it) } ?: t
+                        if (u.sats == 0L) settled[u.txid]?.takeIf { it > 0 }?.let { u = u.copy(label = "external-close", fee = -it) }
+                        u
+                    }
                 }
             }.getOrDefault(txs)
             kotlinx.coroutines.delay(15_000)
@@ -361,17 +372,21 @@ private fun FundSheet(accent: Color, onTx: (String) -> Unit) {
         }
         if (txs.isNotEmpty()) Panel(accent = accent) {
             SectionLabel("On-chain movements", accent)
-            txs.take(30).forEach { t ->
+            // What was left on-chain in the node after each movement, worked back from now.
+            var running = coins.sumOf { it.sats } + txs.filter { it.label == "incoming" }.sumOf { it.sats }
+            val lefts = txs.map { t -> running.also { running -= t.sats } }
+            txs.take(30).forEachIndexed { idx, t ->
                 Spacer(Modifier.height(6.dp))
                 Row(Modifier.fillMaxWidth().clickable { onTx(t.txid) }, verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text(txKind(t), style = MaterialTheme.typography.bodySmall, color = TextMain)
                         Text((if (t.time > 0) fmt.format(java.util.Date(t.time * 1000)) + " · " else "") +
-                            (if (t.confirmations > 0) "${t.confirmations} conf" else "unconfirmed") + " · " + t.txid.take(10) + "…",
+                            (if (t.confirmations > 0) "${t.confirmations} conf" else "unconfirmed") + " · left " + street(groupSats(lefts[idx])),
                             style = MaterialTheme.typography.labelSmall, color = if (t.confirmations > 0) TextFaint else Warn)
                     }
-                    Text((if (t.sats >= 0) "+" else "−") + street(groupSats(kotlin.math.abs(t.sats))),
-                        style = MaterialTheme.typography.bodyMedium, color = if (t.sats >= 0) Good else TextSoft)
+                    val shown = if (t.label == "external-close") t.fee else t.sats
+                    Text((if (shown >= 0 && t.label != "external-close") "+" else "−") + street(groupSats(kotlin.math.abs(shown))),
+                        style = MaterialTheme.typography.bodyMedium, color = if (shown >= 0 && t.label != "external-close") Good else TextSoft)
                 }
             }
         }
@@ -1180,6 +1195,8 @@ private fun txKind(t: Lnd.ChainTx): String {
     val l = t.label.lowercase()
     return when {
         "openchannel" in l -> "channel opened"
+        l == "external-close" -> "channel closed · sent to another address (from the channel)"
+        l == "incoming" -> "incoming · in the mempool"
         ("closechannel" in l || "close" in l) && t.sats == 0L -> "channel closed · sent to another address"
         "closechannel" in l || "close" in l -> "channel closed"
         "sweep" in l -> "swept back"

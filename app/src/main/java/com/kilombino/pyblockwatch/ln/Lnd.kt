@@ -367,6 +367,10 @@ object Lnd {
         }
     }
 
+    /** Closed channels by closing txid: what the node got out of each (its settled balance). */
+    suspend fun closedSettled(): Map<String, Long> =
+        call { Lndmobile.closedChannels(ByteArray(0), it) }.msgs(1).associate { it.string(4) to it.long(8) }
+
     /** One of the node's on-chain coins. [outpoint] is "txid:vout". */
     data class Utxo(val outpoint: String, val address: String, val sats: Long, val confirmations: Long)
 

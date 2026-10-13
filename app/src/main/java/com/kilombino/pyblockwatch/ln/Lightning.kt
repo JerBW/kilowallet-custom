@@ -96,6 +96,62 @@ object Lightning {
 
     fun markOff() { _status.value = Status.Off }
 
+    // ---------------------------------------------------------------- incoming on-chain (FUND)
+    // The light node only learns of a payment once it is in a block (neutrino sees no mempool),
+    // so for its FUND addresses the explorer is asked as well: an incoming payment shows (and
+    // notifies) at 0 confirmations, and again when it confirms.
+
+    fun rememberFundAddress(ctx: Context, a: String) {
+        val p = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val list = (p.getString("fund_addrs", "") ?: "").lines().filter { it.isNotBlank() && it != a } + a
+        p.edit().putString("fund_addrs", list.takeLast(30).joinToString("\n")).apply()
+    }
+
+    /** Payments to the FUND addresses the explorer sees and the node does not yet. */
+    @Volatile var incoming: List<Lnd.ChainTx> = emptyList()
+        private set
+    @Volatile private var lastIncoming = 0L
+
+    private fun checkIncoming(app: Context) {
+        val now = System.currentTimeMillis()
+        if (now - lastIncoming < 60_000) return
+        lastIncoming = now
+        val p = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val addrs = (p.getString("fund_addrs", "") ?: "").lines().filter { it.isNotBlank() }
+        if (addrs.isEmpty()) return
+        val seen = org.json.JSONObject(p.getString("in_seen", "{}") ?: "{}")
+        // The first look only learns what is already there: no alerts for old payments.
+        val first = !p.getBoolean("in_init", false)
+        val pending = ArrayList<Lnd.ChainTx>()
+        val notifier = com.kilombino.pyblockwatch.data.Notifier(app)
+        for (a in addrs) {
+            val arr = runCatching {
+                val c = (java.net.URL("https://mempool.kilombino.com/api/address/$a/txs").openConnection() as java.net.HttpURLConnection)
+                    .apply { connectTimeout = 10_000; readTimeout = 10_000 }
+                try { org.json.JSONArray(c.inputStream.bufferedReader().use { it.readText() }) } finally { c.disconnect() }
+            }.getOrNull() ?: continue
+            for (i in 0 until arr.length()) {
+                val t = arr.getJSONObject(i)
+                val txid = t.getString("txid")
+                val vout = t.getJSONArray("vout")
+                var amount = 0L
+                for (j in 0 until vout.length()) vout.getJSONObject(j).let { o -> if (o.optString("scriptpubkey_address") == a) amount += o.optLong("value") }
+                if (amount <= 0) continue
+                val confirmed = t.optJSONObject("status")?.optBoolean("confirmed") == true
+                val was = seen.optString(txid, "")
+                if (!confirmed) {
+                    pending += Lnd.ChainTx(txid, amount, 0, now / 1000, 0, "incoming")
+                    if (was.isEmpty()) { if (!first) notifier.lightningIn(amount, txid, false); seen.put(txid, "m") }
+                } else if (was != "c") {
+                    if (!first) notifier.lightningIn(amount, txid, true)
+                    seen.put(txid, "c")
+                }
+            }
+        }
+        incoming = pending
+        p.edit().putString("in_seen", seen.toString()).putBoolean("in_init", true).apply()
+    }
+
     /**
      * The node's name, which peers see. Chosen when turning Lightning on; until then a name with
      * a random tag, so not every phone is called the same. Takes effect on the next start.
@@ -271,6 +327,7 @@ object Lightning {
 
     private suspend fun refreshHere() {
         if (!Lnd.running) return
+        appCtx?.let { runCatching { checkIncoming(it) } }
         runCatching {
             val info = Lnd.info()
             link(info.peers)

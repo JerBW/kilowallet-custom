@@ -15,6 +15,7 @@ object OpenTab {
     const val SPAMCOIN = "spamcoin"
     const val ARK = "ark"
     const val COINJOIN = "coinjoin"
+    const val LIGHTNING = "lightning"
     /** Not a tab: a newer release was found in the background; the app offers it on opening. */
     const val UPDATE = "update"
     /** Set by settings' CHECK NOW: say so when there is nothing newer. */

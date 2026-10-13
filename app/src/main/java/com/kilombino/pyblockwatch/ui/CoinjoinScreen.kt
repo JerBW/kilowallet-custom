@@ -134,6 +134,38 @@ fun CoinjoinScreen(vm: WalletViewModel, accent: Color) {
     // How rounds run (on its own or asking), and room to run in the background, in sight.
     AutoPanel(accent)
 
+    // The keys of a round on its own live in memory only: once the app was closed (or Android
+    // stopped it) its rounds ask again. With "on its own" set, one fingerprint resumes them all.
+    val asking = mine.filter { st ->
+        st.phase in setOf(PoolSession.Phase.OPEN, PoolSession.Phase.VOTING, PoolSession.Phase.CLOSING, PoolSession.Phase.SIGNING) &&
+            !st.postedSig && !CoinjoinHub.isAuto(st.poolId)
+    }
+    if (CoinjoinHub.autoDefault(ctx) && asking.isNotEmpty()) Panel(accent = accent) {
+        Text("${asking.size} round" + (if (asking.size == 1) " is" else "s are") + " waiting for you: the app was closed, and the keys of a round on its own live only in memory.",
+            style = MaterialTheme.typography.bodySmall, color = Warn)
+        TextButton(onClick = {
+            runCatching { vm.seedDecryptCipher() }.onSuccess { cipher ->
+                Biometric.authenticate(activity, "Run the rounds on their own", "Unlock once for all of them", cipher,
+                    onSuccess = { authed ->
+                        scope.launch {
+                            runCatching {
+                                withContext(Dispatchers.Default) {
+                                    val all = vm.coinjoinKeys(authed, asking.flatMap { it.coinPaths })
+                                    var i = 0
+                                    asking.forEach { st ->
+                                        val n = st.coinPaths.size
+                                        CoinjoinHub.startAuto(st.poolId, all.subList(i, i + n)); i += n
+                                    }
+                                }
+                            }.onSuccess { message = "All rounds run on their own again." }
+                             .onFailure { message = it.message ?: "could not unlock" }
+                        }
+                    },
+                    onError = { message = it })
+            }.onFailure { message = it.message ?: "could not unlock" }
+        }) { Text("RUN ALL ON THEIR OWN", color = accent) }
+    }
+
     message?.let { m ->
         Panel(accent = Warn) {
             Text(m, color = Warn, style = MaterialTheme.typography.bodySmall)
