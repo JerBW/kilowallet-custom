@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -73,6 +75,11 @@ fun CoinjoinScreen(vm: WalletViewModel, accent: Color) {
     var message by remember { mutableStateOf<String?>(null) }
     var joining by remember { mutableStateOf<Protocol.Terms?>(null) }
     var creating by remember { mutableStateOf(false) }
+    // 0 JOIN, 1 IN PROGRESS, 2 HISTORY: a round going opens on IN PROGRESS.
+    var tab by androidx.compose.runtime.saveable.rememberSaveable {
+        mutableStateOf(if (CoinjoinHub.states.value.any { it.phase !in setOf(PoolSession.Phase.CONFIRMED,
+                PoolSession.Phase.ABORTED, PoolSession.Phase.REJECTED) }) 1 else 0)
+    }
     // Test pools (from 1 000 sats) were for the betas; the release starts at 10 000.
     val testPools = false
     var joinPassword by remember { mutableStateOf("") }
@@ -120,20 +127,6 @@ fun CoinjoinScreen(vm: WalletViewModel, accent: Color) {
         return
     }
 
-    Panel(accent = accent) {
-        SectionLabel("Coinjoin", accent)
-        Spacer(Modifier.height(8.dp))
-        Explain("Mix your coins with other people's: everyone puts one or more coins in and gets back an output of " +
-            "exactly the pool's amount, all identical, so nobody watching the chain can tell whose is whose. " +
-            "A pool is either native SegWit (bc1q) or Taproot (bc1p), never both, so no coin stands out. " +
-            "Each person pays their own share of the fee from their change. No server ever holds your " +
-            "coins: the relay only passes encrypted messages, and you sign only after checking your output.")
-    }
-
-    TelegramAlertsPanel(accent, mine)
-    // How rounds run (on its own or asking), and room to run in the background, in sight.
-    AutoPanel(accent)
-
     // The keys of a round on its own live in memory only: once the app was closed (or Android
     // stopped it) its rounds ask again. With "on its own" set, one fingerprint resumes them all.
     val asking = mine.filter { st ->
@@ -173,14 +166,16 @@ fun CoinjoinScreen(vm: WalletViewModel, accent: Color) {
         }
     }
 
-    // ---- our pools: the ones still going up here; the finished ones fold away at the bottom
+    message?.let { m ->
+        Panel(accent = Warn) {
+            Text(m, color = Warn, style = MaterialTheme.typography.bodySmall)
+            TextButton(onClick = { message = null }) { Text("ok", color = TextSoft) }
+        }
+    }
+
     val finishedPhases = setOf(PoolSession.Phase.CONFIRMED, PoolSession.Phase.ABORTED, PoolSession.Phase.REJECTED)
     val active = mine.filter { it.phase !in finishedPhases }
     val finished = mine.filter { it.phase in finishedPhases }
-    if (active.isNotEmpty()) {
-        SectionLabel("Your pools", accent)
-        active.forEach { st -> MyPoolCard(vm, st, rev, accent, activity) { message = it } }
-    }
 
     // ---- join / create sheets
     joining?.let { t ->
@@ -200,7 +195,7 @@ fun CoinjoinScreen(vm: WalletViewModel, accent: Color) {
                     onPick = { pick ->
                         scope.launch {
                             runCatching { withContext(Dispatchers.Default) { CoinjoinHub.join(ctx, t, pick, joinPassword, CoinjoinHub.autoDefault(ctx)) } }
-                                .onFailure { message = it.message }
+                                .onSuccess { tab = 1 }.onFailure { message = it.message }
                             joining = null; joinPassword = ""
                         }
                     }, onError = { message = it })
@@ -213,10 +208,33 @@ fun CoinjoinScreen(vm: WalletViewModel, accent: Color) {
                 onPick = { pick ->
                     scope.launch {
                         runCatching { withContext(Dispatchers.Default) { CoinjoinHub.create(ctx, pick, amount, rate, peers, hours, minPeers, password, maxInputs, CoinjoinHub.autoDefault(ctx)) } }
-                            .onSuccess { creating = false; reloadPools() }
+                            .onSuccess { creating = false; tab = 1; reloadPools() }
                             .onFailure { message = it.message }
                     }
                 }, onError = { message = it })
+        }
+        return
+    }
+
+    // JOIN · IN PROGRESS · HISTORY: rounds going are shown first when there are any.
+    CoinjoinTabs(tab, active.size, accent) { tab = it }
+    // A card opens by itself while its round waits on you; a tap opens or folds it.
+    val unfolded = remember { androidx.compose.runtime.mutableStateMapOf<String, Boolean>() }
+    @Composable fun card(st: PoolSession.State) = RoundCard(vm, st, rev, accent, activity,
+        open = unfolded[st.poolId] ?: needsMe(st), onToggle = { unfolded[st.poolId] = !(unfolded[st.poolId] ?: needsMe(st)) }) { message = it }
+
+    if (tab == 1) {
+        if (active.isEmpty()) Explain("No rounds going. Join a pool, or open your own, in JOIN.")
+        active.forEach { card(it) }
+        return
+    }
+    if (tab == 2) {
+        if (finished.isEmpty()) Explain("Confirmed and cancelled rounds show here, for a week.")
+        else {
+            finished.forEach { card(it) }
+            TextButton(onClick = { finished.forEach { CoinjoinHub.remove(ctx, it.poolId) } }) {
+                Text("remove all", color = TextFaint, style = MaterialTheme.typography.bodySmall)
+            }
         }
         return
     }
@@ -267,20 +285,19 @@ fun CoinjoinScreen(vm: WalletViewModel, accent: Color) {
         }
     }
 
-    if (finished.isNotEmpty()) {
-        var open by remember { mutableStateOf(false) }
-        Row(Modifier.fillMaxWidth().clickable { open = !open }.padding(vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically) {
-            SectionLabel("Finished pools (${finished.size})", accent)
-            Spacer(Modifier.weight(1f))
-            if (open) TextButton(onClick = { finished.forEach { CoinjoinHub.remove(ctx, it.poolId) } }) {
-                Text("remove all", color = TextFaint, style = MaterialTheme.typography.bodySmall)
-            }
-            Text(if (open) "▾" else "▸", color = TextSoft)
-        }
-        if (open) finished.forEach { st -> MyPoolCard(vm, st, rev, accent, activity) { message = it } }
-        else Explain("Confirmed and cancelled rounds. They go away by themselves after a week.")
+    Panel(accent = accent) {
+        SectionLabel("Coinjoin", accent)
+        Spacer(Modifier.height(8.dp))
+        Explain("Mix your coins with other people's: everyone puts one or more coins in and gets back an output of " +
+            "exactly the pool's amount, all identical, so nobody watching the chain can tell whose is whose. " +
+            "A pool is either native SegWit (bc1q) or Taproot (bc1p), never both, so no coin stands out. " +
+            "Each person pays their own share of the fee from their change. No server ever holds your " +
+            "coins: the relay only passes encrypted messages, and you sign only after checking your output.")
     }
+
+    // How rounds run (on its own or asking), and room to run in the background, in sight.
+    AutoPanel(accent)
+    TelegramAlertsPanel(accent, mine)
 
     Panel(accent = accent) {
         SectionLabel("How a round goes", accent)
@@ -577,7 +594,9 @@ private fun MyPoolCard(
     vm: WalletViewModel, st: PoolSession.State,
     // The state is mutated in place: this changes with it, so the card is redrawn and not skipped.
     // It must be READ below: Compose leaves unused parameters out of its "did anything change" check.
-    rev: Long, accent: Color, activity: FragmentActivity, onMessage: (String) -> Unit) {
+    rev: Long, accent: Color, activity: FragmentActivity,
+    /** Inside a [RoundCard]: no panel of its own, and the amount and status are already above. */
+    embedded: Boolean = false, onMessage: (String) -> Unit) {
     if (rev < 0) return
     val ctx = activity.applicationContext
     val scope = rememberCoroutineScope()
@@ -590,13 +609,15 @@ private fun MyPoolCard(
         else -> accent
     }
     fun act(f: () -> Unit) = scope.launch { withContext(Dispatchers.IO) { runCatching(f) }.onFailure { onMessage(it.message ?: "failed") } }
-    Panel(accent = color) {
+    @Composable fun frame(content: @Composable () -> Unit) { if (embedded) Column { content() } else Panel(accent = color) { content() } }
+    frame {
+        val people = if (st.round.isNotEmpty()) st.round.size else st.seats.size
+        if (!embedded) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("${groupSats(st.terms.amount)} sats" + if (st.terms.script == ScriptType.P2TR) " · Taproot" else "",
                 style = MaterialTheme.typography.titleMedium, color = TextMain, modifier = Modifier.weight(1f))
             Text((if (st.terms.private) "🔒 " else "") + (if (st.creator) "your pool" else "joined"), style = MaterialTheme.typography.bodySmall, color = TextFaint)
         }
-        val people = if (st.round.isNotEmpty()) st.round.size else st.seats.size
         Text(when (st.phase) {
             PoolSession.Phase.JOINING -> "Asking to join…"
             PoolSession.Phase.OPEN -> "Waiting for people · $people/${st.terms.maxPeers} · closes in ${remaining(st.terms.expiresAt)}"
@@ -608,6 +629,7 @@ private fun MyPoolCard(
             PoolSession.Phase.ABORTED -> "Cancelled: ${st.reason}. Your coin did not move."
             PoolSession.Phase.REJECTED -> "Refused: ${st.reason}"
         }, style = MaterialTheme.typography.bodySmall, color = color)
+        }
         Text((if (st.seat.coins.size > 1) "your ${st.seat.coins.size} coins " else "your coin ") +
             "${groupSats(st.seat.inputValue)} → ${groupSats(st.terms.amount)} mixed" +
             (if (st.seat.changeValue > 0) " + ${groupSats(st.seat.changeValue)} change" else "") +
@@ -996,6 +1018,128 @@ private fun TelegramAlertsPanel(accent: Color, mine: List<com.kilombino.pyblockw
                 else -> TextButton(onClick = {
                     com.kilombino.pyblockwatch.coinjoin.CoinjoinAlerts.disable(ctx); on = false; linked = null
                 }) { Text("TURN OFF", color = TextSoft) }
+            }
+        }
+    }
+}
+
+// ------------------------------------------------------------------------------- round cards
+
+/** The five steps of a round, as the card's bar shows them. */
+private const val STEPS = 5
+
+/** Where a round is, 1..5: people, closing vote, outputs and signatures, sent, confirmed. */
+private fun stepOf(st: PoolSession.State): Int = when (st.phase) {
+    PoolSession.Phase.JOINING, PoolSession.Phase.OPEN -> 1
+    PoolSession.Phase.VOTING -> 2
+    PoolSession.Phase.CLOSING, PoolSession.Phase.SIGNING -> 3
+    PoolSession.Phase.BROADCAST -> 4
+    PoolSession.Phase.CONFIRMED -> 5
+    PoolSession.Phase.ABORTED, PoolSession.Phase.REJECTED -> 0
+}
+
+/** True while the round waits on this person (an answer or a signature by hand). */
+internal fun needsMe(st: PoolSession.State): Boolean {
+    if (CoinjoinHub.isAuto(st.poolId)) return false
+    return when (st.phase) {
+        PoolSession.Phase.VOTING -> st.voteBy != st.token?.let { Protocol.tokenHash(it) } && st.votedOn != st.voteId
+        PoolSession.Phase.SIGNING -> !st.postedSig
+        else -> false
+    }
+}
+
+private fun hhmm(at: Long): String =
+    java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(at * 1000))
+
+/** Steps done in green, the current one in the accent, the rest as empty rings. */
+@Composable
+private fun RoundSteps(step: Int, accent: Color) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        for (i in 1..STEPS) {
+            val done = i < step || step == STEPS
+            val now = i == step && step < STEPS
+            androidx.compose.foundation.layout.Box(
+                Modifier.size(12.dp).clip(androidx.compose.foundation.shape.CircleShape)
+                    .background(if (done) Good else if (now) accent else Color.Transparent)
+                    .then(if (done || now) Modifier else Modifier.border(1.5.dp, TextFaint, androidx.compose.foundation.shape.CircleShape))
+            )
+            if (i < STEPS) androidx.compose.foundation.layout.Box(
+                Modifier.weight(1f).height(2.dp).background(if (i < step) Good else TextFaint.copy(alpha = 0.5f))
+            )
+        }
+    }
+}
+
+/**
+ * One round at a glance: the amount, the bar of its five steps, what is happening and where
+ * your coin is now. Tapping it shows the whole card ([MyPoolCard]), which opens by itself
+ * while the round waits on you.
+ */
+@Composable
+private fun RoundCard(
+    vm: WalletViewModel, st: PoolSession.State, rev: Long, accent: Color, activity: FragmentActivity,
+    open: Boolean, onToggle: () -> Unit, onMessage: (String) -> Unit,
+) {
+    if (rev < 0) return
+    val step = stepOf(st)
+    val over = step == 0
+    val people = if (st.round.isNotEmpty()) st.round.size else st.seats.size
+    val color = if (over) Bad else if (step == STEPS) Good else accent
+    val status = when (st.phase) {
+        PoolSession.Phase.JOINING -> "Asking to join"
+        PoolSession.Phase.OPEN -> "Waiting for people · $people/${st.terms.maxPeers} people · closes at ${hhmm(st.terms.expiresAt)}"
+        PoolSession.Phase.VOTING -> if (needsMe(st)) "Closing vote · your answer, by ${hhmm(st.voteDeadline)}" else "Closing vote · $people people"
+        PoolSession.Phase.CLOSING -> "Closing · $people people · collecting outputs"
+        PoolSession.Phase.SIGNING -> if (st.postedSig) "Signed · waiting for the others" else if (needsMe(st)) "Ready to sign" else "Signing"
+        PoolSession.Phase.BROADCAST -> "Sent · waiting for a block"
+        PoolSession.Phase.CONFIRMED -> "Confirmed"
+        PoolSession.Phase.ABORTED -> "Cancelled"
+        PoolSession.Phase.REJECTED -> "Refused"
+    }
+    val where = when (st.phase) {
+        PoolSession.Phase.BROADCAST -> "Your coin left in the group transaction. Waiting for a block."
+        PoolSession.Phase.CONFIRMED -> "Done: your mixed coin of ${groupSats(st.terms.amount)} sats is in your wallet."
+        PoolSession.Phase.ABORTED, PoolSession.Phase.REJECTED -> "${st.reason.replaceFirstChar { it.uppercase() }}. Your coin did not move."
+        else -> "Your coin is still in your wallet — it hasn't left."
+    }
+    Panel(accent = color) {
+        Column(Modifier.fillMaxWidth().clickable { onToggle() }) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text((if (st.terms.private) "🔒 " else "") + "${groupSats(st.terms.amount)} sats each" +
+                    (if (st.terms.script == ScriptType.P2TR) " · Taproot" else ""),
+                    style = MaterialTheme.typography.titleMedium, color = TextMain, modifier = Modifier.weight(1f))
+                Text((if (over) "" else "$step/$STEPS ") + if (open) "⌄" else "›",
+                    style = MaterialTheme.typography.titleMedium, color = color)
+            }
+            if (!over) RoundSteps(step, accent)
+            Text(status, style = MaterialTheme.typography.bodyMedium, color = color)
+            Spacer(Modifier.height(2.dp))
+            Text(where, style = MaterialTheme.typography.bodySmall, color = TextSoft)
+        }
+        if (open) {
+            Spacer(Modifier.height(8.dp))
+            MyPoolCard(vm, st, rev, accent, activity, embedded = true, onMessage = onMessage)
+        }
+    }
+}
+
+/** JOIN · IN PROGRESS (n) · HISTORY. */
+@Composable
+private fun CoinjoinTabs(tab: Int, inProgress: Int, accent: Color, onTab: (Int) -> Unit) {
+    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(PanelBg).padding(4.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        listOf("JOIN", "IN PROGRESS", "HISTORY").forEachIndexed { i, label ->
+            val on = i == tab
+            Row(Modifier.weight(1f).clip(RoundedCornerShape(10.dp)).background(if (on) accent else Color.Transparent)
+                .clickable { onTab(i) }.padding(vertical = 10.dp),
+                horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                Text(label, style = MaterialTheme.typography.labelMedium, color = if (on) Ink else TextSoft, maxLines = 1)
+                if (i == 1 && inProgress > 0) {
+                    Spacer(Modifier.width(6.dp))
+                    Text("$inProgress", style = MaterialTheme.typography.labelSmall, color = if (on) accent else Ink,
+                        modifier = Modifier.clip(androidx.compose.foundation.shape.CircleShape)
+                            .background(if (on) Ink else accent).padding(horizontal = 6.dp, vertical = 1.dp))
+                }
             }
         }
     }
