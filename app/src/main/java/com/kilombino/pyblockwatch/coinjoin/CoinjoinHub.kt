@@ -48,6 +48,8 @@ object CoinjoinHub {
     private fun persist(ctx: Context) {
         val a = JSONArray(); sessions.values.forEach { a.put(it.state.toJson()) }
         prefs(ctx).edit().putString(KEY_SESSIONS, a.toString()).apply()
+        // Keys kept for rounds on their own: only while the round is live and still on its own.
+        AutoKeyVault.keepOnly(ctx, sessions.values.filter { !it.done && it.autoKeys != null }.map { it.state.poolId }.toSet())
         _states.value = sessions.values.map { it.state }.sortedByDescending { it.created }
         _version.value++
     }
@@ -63,8 +65,12 @@ object CoinjoinHub {
             val st = runCatching { PoolSession.State.parse(a.getJSONObject(i)) }.getOrNull() ?: continue
             val finished = st.phase in setOf(PoolSession.Phase.CONFIRMED, PoolSession.Phase.ABORTED, PoolSession.Phase.REJECTED)
             if (finished && st.created < weekAgo) continue
-            sessions[st.poolId] = PoolSession(env(ctx, st), st)
+            val s = PoolSession(env(ctx, st), st)
+            // A round on its own carries on after the app was closed: its keys come back from the vault.
+            if (!finished) AutoKeyVault.load(ctx, st.poolId)?.let { s.autoKeys = it }
+            sessions[st.poolId] = s
         }
+        appCtx = ctx.applicationContext
         _states.value = sessions.values.map { it.state }.sortedByDescending { it.created }
         _version.value++
     }
@@ -146,10 +152,13 @@ object CoinjoinHub {
     fun setAutoDefault(ctx: Context, on: Boolean) =
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean("cj_auto", on).apply()
 
+    @Volatile private var appCtx: Context? = null
+
     /** Run a round already joined on its own from now: [keys] of its coins, one unlock. */
     fun startAuto(poolId: String, keys: List<java.math.BigInteger>) {
         val s = session(poolId) ?: return
         s.autoKeys = keys
+        appCtx?.let { AutoKeyVault.save(it, poolId, keys) }
         // Already asked to close, or waiting for a signature: answer now, through the same checks.
         if (s.state.phase == PoolSession.Phase.VOTING && s.state.votedOn != s.state.voteId) runCatching { s.vote(true) }
         if (s.state.phase == PoolSession.Phase.SIGNING && !s.state.postedSig) runCatching { s.sign(keys) }
@@ -157,11 +166,17 @@ object CoinjoinHub {
     }
 
     /** Stop running [poolId] on its own: its keys are dropped, and the next steps ask again. */
-    fun stopAuto(poolId: String) { session(poolId)?.autoKeys = null; _version.value++ }
+    fun stopAuto(poolId: String) {
+        session(poolId)?.autoKeys = null
+        appCtx?.let { AutoKeyVault.remove(it, poolId) }
+        _version.value++
+    }
 
     private fun add(ctx: Context, st: PoolSession.State, keys: List<java.math.BigInteger>? = null): PoolSession {
         val s = PoolSession(env(ctx, st), st)
         s.autoKeys = keys
+        appCtx = ctx.applicationContext
+        if (keys != null) AutoKeyVault.save(ctx, st.poolId, keys)
         synchronized(this) { sessions[st.poolId] = s }
         persist(ctx)
         CoinjoinService.start(ctx)

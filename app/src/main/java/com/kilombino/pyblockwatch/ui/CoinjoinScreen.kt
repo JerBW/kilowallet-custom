@@ -141,7 +141,7 @@ fun CoinjoinScreen(vm: WalletViewModel, accent: Color) {
             !st.postedSig && !CoinjoinHub.isAuto(st.poolId)
     }
     if (CoinjoinHub.autoDefault(ctx) && asking.isNotEmpty()) Panel(accent = accent) {
-        Text("${asking.size} round" + (if (asking.size == 1) " is" else "s are") + " waiting for you: the app was closed, and the keys of a round on its own live only in memory.",
+        Text("${asking.size} round" + (if (asking.size == 1) " is" else "s are") + " waiting for you (joined before rounds kept their keys, or asking at each step).",
             style = MaterialTheme.typography.bodySmall, color = Warn)
         TextButton(onClick = {
             runCatching { vm.seedDecryptCipher() }.onSuccess { cipher ->
@@ -755,7 +755,8 @@ internal fun CoinjoinAutoSetting(accent: Color) {
             Column(Modifier.weight(1f)) {
                 Text("Run the round on its own", style = MaterialTheme.typography.bodyMedium, color = TextMain)
                 Explain(if (on) "One fingerprint when you join; then it accepts closing and signs by itself, only " +
-                    "if the transaction pays your exact output and change. The keys stay in memory until the round ends."
+                    "if the transaction pays your exact output and change. It carries on after the app is closed and opened again: " +
+                    "the keys of the round's coins are kept encrypted on this phone until the round ends."
                     else "Off: you accept closing and sign yourself, with your fingerprint, at each step.")
             }
             androidx.compose.material3.Switch(checked = on, onCheckedChange = { on = it; CoinjoinHub.setAutoDefault(ctx, it) },
