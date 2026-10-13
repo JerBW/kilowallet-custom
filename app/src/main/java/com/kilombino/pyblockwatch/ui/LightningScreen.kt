@@ -410,7 +410,8 @@ private fun OpenSheet(accent: Color, onchain: Long, onTx: (String) -> Unit, onDo
         }
         if (custom) OutlinedTextField(node, { node = it.trim() }, label = { Text("pubkey@host:port") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         if (coins.isNotEmpty()) {
-            Text("Coins to use (none ticked: the node chooses)", style = MaterialTheme.typography.bodySmall, color = TextSoft)
+            Text("Coins to use (none ticked: the node chooses). With an amount, the node takes only what it needs from the ticked ones; with the amount blank, all the ticked coins go into the channel.",
+                style = MaterialTheme.typography.bodySmall, color = TextSoft)
             coins.forEach { u ->
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     androidx.compose.material3.Checkbox(checked = u.outpoint in picked, onCheckedChange = { on ->
