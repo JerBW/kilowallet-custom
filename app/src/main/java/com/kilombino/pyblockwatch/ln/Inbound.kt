@@ -41,6 +41,9 @@ object Inbound {
 
     /** Asks for a channel of [sats]; the node signs the request. */
     suspend fun quote(ourPubkey: String, sats: Long): Quote {
+        // The service opens the channel to a node connected to it: reach Kilombino's node
+        // first (a wallet whose channels are with other nodes may not be connected to it).
+        if (!Lightning.connectKilombino()) throw IllegalStateException("Cannot reach Kilombino's node: " + (Lightning.linkError ?: "no answer"))
         val ts = System.currentTimeMillis() / 1000
         val sig = Lnd.signMessage("kilowallet-lsp:v1:$ourPubkey:$sats:$ts")
         val o = http("POST", "/quote", JSONObject().put("pubkey", ourPubkey).put("sats", sats).put("ts", ts).put("signature", sig))

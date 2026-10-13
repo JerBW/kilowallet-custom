@@ -234,6 +234,11 @@ object Lightning {
         val now = System.currentTimeMillis()
         if (now - lastLink < 30_000) return
         lastLink = now
+        connectKilombino()
+    }
+
+    /** Connects to Kilombino's node (its name resolved here, then the onion); true when connected. */
+    suspend fun connectKilombino(): Boolean {
         val host = KILOMBINO_HOST.substringBefore(':'); val port = KILOMBINO_HOST.substringAfter(':')
         val ips = runCatching { java.net.InetAddress.getAllByName(host).map { it.hostAddress } }.getOrDefault(emptyList())
         val targets = ips.map { if (':' in it) "[$it]:$port" else "$it:$port" } + KILOMBINO_HOST +
@@ -241,10 +246,11 @@ object Lightning {
         val errors = ArrayList<String>()
         for (t in targets) {
             val r = runCatching { Lnd.connect(KILOMBINO_NODE, t) }
-            if (r.isSuccess) { linked = true; linkError = null; return }
+            if (r.isSuccess) { linked = true; linkError = null; return true }
             errors += "$t: ${r.exceptionOrNull()?.message}"
         }
         linkError = if (targets.isEmpty()) "could not resolve $host" else errors.joinToString("\n")
+        return false
     }
 
     private suspend fun addTowerOnce() {
