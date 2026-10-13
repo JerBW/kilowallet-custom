@@ -417,6 +417,10 @@ object Lnd {
         call(120_000) { Lndmobile.restoreChannelBackups(Pb().bytes(2, multi).build(), it) }
     }
 
+    /** Signs [msg] with the node's key (lnrpc.SignMessage): zbase32, checkable with the node pubkey. */
+    suspend fun signMessage(msg: String): String =
+        call { Lndmobile.signMessage(Pb().bytes(1, msg.toByteArray(Charsets.UTF_8)).build(), it) }.string(1)
+
     /** The Static Channel Backup of every channel, to keep with the backup file. */
     suspend fun channelBackup(): ByteArray =
         call { Lndmobile.exportAllChannelBackups(ByteArray(0), it) }.msg(2).bytes(2)

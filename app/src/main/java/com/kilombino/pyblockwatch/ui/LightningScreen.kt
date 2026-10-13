@@ -41,6 +41,7 @@ import com.kilombino.pyblockwatch.crypto.Bip39
 import com.kilombino.pyblockwatch.ln.Lightning
 import com.kilombino.pyblockwatch.ln.Lnd
 import com.kilombino.pyblockwatch.ln.LnMove
+import com.kilombino.pyblockwatch.ln.Inbound
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -300,6 +301,8 @@ private fun LnNode(s: Lightning.Status.Running, accent: Color, settings: Boolean
             }
         }
     }
+
+    InboundPanel(accent, s, onTx = { showTx = "Funding transaction" to it })
 
     if (settings) {
         AliasPanel(accent, s.info.alias)
@@ -1169,5 +1172,105 @@ private fun txKind(t: Lnd.ChainTx): String {
         "sweep" in l -> "swept back"
         t.sats >= 0 -> "received"
         else -> "sent"
+    }
+}
+
+/**
+ * Asking Kilombino's node for a channel towards this one (inbound liquidity), kept low-key at
+ * the bottom: a private channel of whole millions, for 5,000 sats per million, kept open at
+ * least the service's minimum days. The fee goes as a hold invoice, settled only once the
+ * channel is out; if it cannot be opened the payment comes back by itself.
+ */
+@Composable
+private fun InboundPanel(accent: Color, s: Lightning.Status.Running, onTx: (String) -> Unit) {
+    val scope = rememberCoroutineScope()
+    var open by remember { mutableStateOf(false) }
+    var info by remember { mutableStateOf<Inbound.Info?>(null) }
+    var millions by remember { mutableStateOf(1) }
+    var quote by remember { mutableStateOf<Inbound.Quote?>(null) }
+    var status by remember { mutableStateOf<String?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    var err by remember { mutableStateOf<String?>(null) }
+    var orderId by remember { mutableStateOf<String?>(null) }
+    val canPay = s.channels.any { it.active && it.local > 0 }
+
+    // Follow the request until the channel is out (or it fails and the fee comes back).
+    LaunchedEffect(orderId) {
+        val id = orderId ?: return@LaunchedEffect
+        while (true) {
+            kotlinx.coroutines.delay(4_000)
+            val o = runCatching { withContext(Dispatchers.IO) { Inbound.order(id) } }.getOrNull() ?: continue
+            when (o.status) {
+                "opening", "open" -> { status = "✅ Channel on its way: usable once it confirms."; o.fundingTxid?.let(onTx); Lightning.refresh(); orderId = null; break }
+                "failed" -> { status = null; err = "Not opened: " + (o.reason ?: "unknown") + ". The fee comes back by itself."; orderId = null; break }
+                "expired" -> { status = null; err = "The request expired without being paid."; orderId = null; break }
+            }
+        }
+    }
+
+    Panel(accent = accent) {
+        Row(Modifier.fillMaxWidth().clickable { open = !open }, verticalAlignment = Alignment.CenterVertically) {
+            Text("Need to receive more? Inbound channel from Kilombino's node", style = MaterialTheme.typography.bodySmall,
+                color = TextSoft, modifier = Modifier.weight(1f))
+            Text(if (open) "▲" else "▼", color = TextFaint)
+        }
+        if (!open) return@Panel
+        LaunchedEffect(Unit) {
+            info = runCatching { withContext(Dispatchers.IO) { Inbound.info() } }
+                .onFailure { err = "The service does not answer: " + it.message }.getOrNull()
+        }
+        Spacer(Modifier.height(6.dp))
+        Explain("You can only receive up to what the other side holds in your channels. Kilombino's node can open a private channel towards yours, with the sats on its side, so you can receive that much. It is not a deposit: those sats are not yours until someone pays you.")
+        val i = info
+        if (i == null) { if (err == null) Text("Asking the service…", style = MaterialTheme.typography.bodySmall, color = TextFaint) }
+        else {
+            val maxM = (minOf(i.maxSats, i.availableSats) / 1_000_000).toInt()
+            Text("Fee: " + groupSats(i.feePerMillion) + " sats per million · kept open at least ${i.minDays} days, longer while it is used · private",
+                style = MaterialTheme.typography.bodySmall, color = TextSoft)
+            if (maxM < 1) Text("No liquidity free right now: try again later.", style = MaterialTheme.typography.bodySmall, color = Warn)
+            else {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(enabled = millions > 1, onClick = { millions-- }) { Text("−", color = accent) }
+                    Text("$millions million sats", style = MaterialTheme.typography.titleSmall, color = TextMain)
+                    TextButton(enabled = millions < maxM, onClick = { millions++ }) { Text("+", color = accent) }
+                }
+                Text("Fee " + groupSats(i.feePerMillion * millions) + " sats · up to $maxM million now", style = MaterialTheme.typography.labelSmall, color = TextFaint)
+                if (!canPay) Text("The fee is paid over Lightning: you need an active channel with some sats on your side first.",
+                    style = MaterialTheme.typography.bodySmall, color = Warn)
+                Button(enabled = !busy && orderId == null && canPay, modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = accent), onClick = {
+                        busy = true; err = null; status = null
+                        scope.launch {
+                            runCatching { withContext(Dispatchers.IO) { Inbound.quote(s.info.pubkey, millions * 1_000_000L) } }
+                                .onSuccess { quote = it }.onFailure { err = it.message }
+                            busy = false
+                        }
+                    }) { Text(if (busy) "ASKING…" else "ASK FOR $millions MILLION") }
+            }
+        }
+        status?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = Good) }
+        err?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = Bad) }
+    }
+
+    quote?.let { q ->
+        val ctx = LocalContext.current
+        AlertDialog(onDismissRequest = { quote = null },
+            title = { Text("Pay ${groupSats(q.fee)} sats for an inbound channel of ${groupSats(q.sats)}?") },
+            text = {
+                Text("Kilombino's node opens a private channel of ${groupSats(q.sats)} sats towards yours, kept open at least ${info?.minDays ?: 90} days. " +
+                    "The fee is held, not taken, until the channel's transaction is out; if it cannot be opened, it comes back by itself. " +
+                    "This offer lasts 10 minutes.", style = MaterialTheme.typography.bodySmall)
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    quote = null; orderId = q.id; status = "Paying the fee and waiting for the channel…"
+                    scope.launch {
+                        // The payment only completes once the channel is out (hold invoice).
+                        runCatching { withContext(Dispatchers.IO) { Lnd.pay(q.invoice, Lightning.feeLimit(ctx, q.fee), 120) } }
+                            .onFailure { e -> if (orderId != null) { err = "The fee was not paid: " + (e.message ?: "failed"); status = null } }
+                    }
+                }) { Text("PAY AND OPEN", color = accent) }
+            },
+            dismissButton = { TextButton(onClick = { quote = null }) { Text("CANCEL") } })
     }
 }
