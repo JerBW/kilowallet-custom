@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A coinjoin round folded on the lock screen: amount, step and countdown in one line, the bar of its five steps below. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="wrap_content"
+    android:orientation="vertical" android:background="@drawable/cj_card_bg"
+    android:paddingStart="14dp" android:paddingEnd="14dp" android:paddingTop="4dp" android:paddingBottom="5dp">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical">
+        <TextView android:id="@+id/cj_title" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+            android:textColor="#DCD0EC" android:textSize="13sp" android:textStyle="bold" android:fontFamily="monospace" android:maxLines="1" android:ellipsize="end" />
+        <LinearLayout android:id="@+id/cj_timer_box" android:layout_width="wrap_content" android:layout_height="wrap_content" android:orientation="horizontal" android:paddingStart="6dp">
+            <Chronometer android:id="@+id/cj_timer" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:textColor="#B96BFF" android:textSize="13sp" android:textStyle="bold" android:fontFamily="monospace" />
+        </LinearLayout>
+    </LinearLayout>
+    <TextView android:id="@+id/cj_status" android:layout_width="match_parent" android:layout_height="wrap_content" android:visibility="gone" />
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal"
+        android:gravity="center_vertical" android:layout_marginTop="4dp">
+        <ImageView android:id="@+id/cj_dot1" android:layout_width="11dp" android:layout_height="11dp" android:src="@drawable/cj_dot_empty" />
+        <ImageView android:id="@+id/cj_bar1" android:layout_width="0dp" android:layout_height="2dp" android:layout_weight="1" android:background="#3A2E4E" />
+        <ImageView android:id="@+id/cj_dot2" android:layout_width="11dp" android:layout_height="11dp" android:src="@drawable/cj_dot_empty" />
+        <ImageView android:id="@+id/cj_bar2" android:layout_width="0dp" android:layout_height="2dp" android:layout_weight="1" android:background="#3A2E4E" />
+        <ImageView android:id="@+id/cj_dot3" android:layout_width="11dp" android:layout_height="11dp" android:src="@drawable/cj_dot_empty" />
+        <ImageView android:id="@+id/cj_bar3" android:layout_width="0dp" android:layout_height="2dp" android:layout_weight="1" android:background="#3A2E4E" />
+        <ImageView android:id="@+id/cj_dot4" android:layout_width="11dp" android:layout_height="11dp" android:src="@drawable/cj_dot_empty" />
+        <ImageView android:id="@+id/cj_bar4" android:layout_width="0dp" android:layout_height="2dp" android:layout_weight="1" android:background="#3A2E4E" />
+        <ImageView android:id="@+id/cj_dot5" android:layout_width="11dp" android:layout_height="11dp" android:src="@drawable/cj_dot_empty" />
+    </LinearLayout>
+</LinearLayout>

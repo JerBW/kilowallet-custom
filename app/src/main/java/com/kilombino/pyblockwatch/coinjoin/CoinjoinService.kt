@@ -23,6 +23,8 @@ class CoinjoinService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
             startForeground(ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
         else startForeground(ID, n)
+        // The cards first: a round that ended while the app was away still gets its last one.
+        runCatching { RoundNotifications.update(this, first()?.poolId) }
         if (!CoinjoinHub.hasActive(this)) { stopSelf(); return START_NOT_STICKY }
         if (!started) { started = true; CoinjoinHub.startAll(this) }
         return START_STICKY
@@ -47,14 +49,22 @@ class CoinjoinService : Service() {
             if (started) CoinjoinHub.startAll(ctx)
         }
 
-        /** Redraw the ongoing notification, or stop when no round needs us any more. */
+        /** The round the service's own notification shows: the first one going. */
+        private fun first(): PoolSession.State? = CoinjoinHub.states.value
+            .filter { it.phase !in setOf(PoolSession.Phase.CONFIRMED, PoolSession.Phase.ABORTED, PoolSession.Phase.REJECTED) }
+            .minByOrNull { it.created }
+
+        /** Redraw the round cards and the ongoing notification, or stop when no round needs us any more. */
         fun refresh(ctx: Context) {
+            runCatching { RoundNotifications.update(ctx, if (started) first()?.poolId else null) }
             if (!started) return
             if (!CoinjoinHub.hasActive(ctx)) { ctx.stopService(Intent(ctx, CoinjoinService::class.java)); return }
             (ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).notify(ID, ongoing(ctx))
         }
 
         private fun ongoing(ctx: Context): Notification {
+            // The first round going is this notification, drawn as its lock-screen card.
+            first()?.let { st -> runCatching { return RoundNotifications.card(ctx, st) } }
             val live = CoinjoinHub.states.value.filter { it.phase !in setOf(PoolSession.Phase.CONFIRMED, PoolSession.Phase.ABORTED, PoolSession.Phase.REJECTED) }
             val text = live.firstOrNull()?.let { s ->
                 when (s.phase) {

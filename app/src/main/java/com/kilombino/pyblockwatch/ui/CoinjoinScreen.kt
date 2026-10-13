@@ -102,6 +102,8 @@ fun CoinjoinScreen(vm: WalletViewModel, accent: Color) {
     LaunchedEffect(Unit) {
         CoinjoinHub.load(ctx)
         if (CoinjoinHub.hasActive(ctx)) com.kilombino.pyblockwatch.coinjoin.CoinjoinService.start(ctx)
+        // The lock-screen cards follow the rounds as they are now.
+        com.kilombino.pyblockwatch.coinjoin.CoinjoinService.refresh(ctx)
         reloadPools()
         // While the tab is open, the open pools are looked up again every minute.
         while (true) { kotlinx.coroutines.delay(60_000); reloadPools() }

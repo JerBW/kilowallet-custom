@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A coinjoin round on the lock screen: amount, step, the bar of its five steps, where the coin is and the countdown. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="wrap_content"
+    android:orientation="vertical" android:background="@drawable/cj_card_bg"
+    android:paddingStart="14dp" android:paddingEnd="14dp" android:paddingTop="10dp" android:paddingBottom="12dp">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical">
+        <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical">
+            <TextView android:id="@+id/cj_title" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:textColor="#DCD0EC" android:textSize="16sp" android:textStyle="bold" android:fontFamily="monospace" android:maxLines="1" android:ellipsize="end" />
+            <TextView android:id="@+id/cj_status" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:textColor="#B96BFF" android:textSize="14sp" android:textStyle="bold" android:fontFamily="monospace" android:maxLines="1" android:ellipsize="end" />
+        </LinearLayout>
+        <LinearLayout android:id="@+id/cj_timer_box" android:layout_width="wrap_content" android:layout_height="wrap_content" android:orientation="vertical" android:gravity="end" android:paddingStart="8dp">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="closes in"
+                android:textColor="#8A7AA6" android:textSize="11sp" android:fontFamily="monospace" />
+            <Chronometer android:id="@+id/cj_timer" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:textColor="#B96BFF" android:textSize="20sp" android:textStyle="bold" android:fontFamily="monospace" />
+        </LinearLayout>
+    </LinearLayout>
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal"
+        android:gravity="center_vertical" android:layout_marginTop="8dp">
+        <ImageView android:id="@+id/cj_dot1" android:layout_width="12dp" android:layout_height="12dp" android:src="@drawable/cj_dot_empty" />
+        <ImageView android:id="@+id/cj_bar1" android:layout_width="0dp" android:layout_height="2dp" android:layout_weight="1" android:background="#3A2E4E" />
+        <ImageView android:id="@+id/cj_dot2" android:layout_width="12dp" android:layout_height="12dp" android:src="@drawable/cj_dot_empty" />
+        <ImageView android:id="@+id/cj_bar2" android:layout_width="0dp" android:layout_height="2dp" android:layout_weight="1" android:background="#3A2E4E" />
+        <ImageView android:id="@+id/cj_dot3" android:layout_width="12dp" android:layout_height="12dp" android:src="@drawable/cj_dot_empty" />
+        <ImageView android:id="@+id/cj_bar3" android:layout_width="0dp" android:layout_height="2dp" android:layout_weight="1" android:background="#3A2E4E" />
+        <ImageView android:id="@+id/cj_dot4" android:layout_width="12dp" android:layout_height="12dp" android:src="@drawable/cj_dot_empty" />
+        <ImageView android:id="@+id/cj_bar4" android:layout_width="0dp" android:layout_height="2dp" android:layout_weight="1" android:background="#3A2E4E" />
+        <ImageView android:id="@+id/cj_dot5" android:layout_width="12dp" android:layout_height="12dp" android:src="@drawable/cj_dot_empty" />
+    </LinearLayout>
+    <TextView android:id="@+id/cj_where" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp"
+        android:textColor="#DCD0EC" android:textSize="13sp" android:fontFamily="monospace" android:maxLines="2" android:ellipsize="end" />
+</LinearLayout>
