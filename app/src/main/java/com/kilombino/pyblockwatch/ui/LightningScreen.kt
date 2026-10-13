@@ -258,7 +258,7 @@ private fun LnNode(s: Lightning.Status.Running, accent: Color, settings: Boolean
         LnSheet.Fund -> FundSheet(accent) { showTx = "On-chain transaction" to it }
         LnSheet.Open -> OpenSheet(accent, b?.onchainConfirmed ?: 0, onTx = { showTx = "Funding transaction" to it }) { sheet = LnSheet.None }
         LnSheet.Receive -> { ReceiveLn(accent, i.syncedChain && s.channels.any { it.active }); Movements(accent, book.filter { it.delta > 0 }, "Invoices paid to you") }
-        LnSheet.Pay -> { PaySheet(accent, onTx = { showTx = "On-chain payment" to it }) { sheet = LnSheet.None }; Movements(accent, book.filter { it.delta < 0 }, "Payments you made") }
+        LnSheet.Pay -> { PaySheet(accent, s.channels, onTx = { showTx = "On-chain payment" to it }) { sheet = LnSheet.None }; Movements(accent, book.filter { it.delta < 0 }, "Payments you made") }
         LnSheet.None -> {}
     }
 
@@ -478,7 +478,13 @@ private fun OpenSheet(accent: Color, onchain: Long, onTx: (String) -> Unit, onDo
                             if (amt > 0 && chosen.size > 1) Lnd.openChannelAllCoins(pk, amt, rate, chosen.map { it.outpoint })
                             else Lnd.openChannel(pk, amt, rate, coins = chosen.map { it.outpoint })
                         }
-                    }.onSuccess { msg = "Opening: usable once it confirms (the peer decides how many blocks, usually 1 to 3). Save a new backup file (Settings) so it includes this channel." to true; Lightning.refresh(); onTx(it) }
+                    }.onSuccess {
+                        msg = "Opening: usable once it confirms (the peer decides how many blocks, usually 1 to 3). Save a new backup file (Settings) so it includes this channel." to true
+                        Lightning.refresh(); onTx(it)
+                        // The coins it spent are gone and the change is new: show the list as it is now.
+                        picked = emptySet(); amount = ""
+                        coins = runCatching { withContext(Dispatchers.IO) { Lnd.utxos() } }.getOrDefault(coins)
+                    }
                      .onFailure { msg = (it.message ?: "could not open the channel") to false }
                     busy = false
                 }
@@ -546,7 +552,9 @@ private fun ReceiveLn(accent: Color, ready: Boolean) {
 }
 
 @Composable
-private fun PayLn(accent: Color, scanned: String?, onDone: () -> Unit) {
+private fun PayLn(accent: Color, scanned: String?, channels: List<Lnd.Channel>, onDone: () -> Unit) {
+    // Which channel the payment leaves through; null lets the node choose.
+    var via by remember { mutableStateOf<Long?>(null) }
     val scope = rememberCoroutineScope()
     var text by remember { mutableStateOf("") }
     LaunchedEffect(scanned) { if (scanned != null) text = scanned }
@@ -588,6 +596,21 @@ private fun PayLn(accent: Color, scanned: String?, onDone: () -> Unit) {
                     if (r.description.isNotBlank()) Text("“${r.description}”", style = MaterialTheme.typography.bodySmall)
                     Text("To ${r.destination.take(20)}…", style = MaterialTheme.typography.bodySmall, color = TextSoft)
                     Text("Routing fee at most ${groupSats(feeLimit)} sats (change it in settings).", style = MaterialTheme.typography.bodySmall, color = TextSoft)
+                    val usable = channels.filter { it.active && it.local > r.sats }
+                    if (usable.size > 1) {
+                        Text("Pay through:", style = MaterialTheme.typography.bodySmall, color = TextSoft)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            androidx.compose.material3.RadioButton(selected = via == null, onClick = { via = null })
+                            Text("any channel (the node picks)", style = MaterialTheme.typography.bodySmall)
+                        }
+                        usable.forEach { c ->
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                androidx.compose.material3.RadioButton(selected = via == c.chanId, onClick = { via = c.chanId })
+                                Text(c.peerAlias.ifBlank { c.peer.take(12) + "…" } + " · " + groupSats(c.local) + " yours",
+                                    style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                    }
                     if (r.sats == 0L) Text("This invoice has no amount: it is not supported yet.", color = Bad, style = MaterialTheme.typography.bodySmall)
                 }
             },
@@ -595,7 +618,7 @@ private fun PayLn(accent: Color, scanned: String?, onDone: () -> Unit) {
                 TextButton(enabled = !busy && r.sats > 0, onClick = {
                     busy = true
                     scope.launch {
-                        runCatching { withContext(Dispatchers.IO) { Lnd.pay(text.removePrefix("lightning:"), feeLimit) } }
+                        runCatching { withContext(Dispatchers.IO) { Lnd.pay(text.removePrefix("lightning:"), feeLimit, outgoingChanId = via) } }
                             .onSuccess { paidSats = r.sats; msg = null; text = ""; Lightning.refresh() }
                             .onFailure { msg = ("Not paid: " + (it.message ?: "failed")) to false }
                         busy = false; req = null
@@ -920,7 +943,7 @@ private fun DeleteEmptyNode(accent: Color, s: Lightning.Status.Running) {
  * invoice field; a Bitcoin address or bitcoin: URI to the on-chain payment.
  */
 @Composable
-private fun PaySheet(accent: Color, onTx: (String) -> Unit, onDone: () -> Unit) {
+private fun PaySheet(accent: Color, channels: List<Lnd.Channel>, onTx: (String) -> Unit, onDone: () -> Unit) {
     val ctx = LocalContext.current
     var scanning by remember { mutableStateOf(false) }
     var invoice by remember { mutableStateOf<String?>(null) }
@@ -954,7 +977,7 @@ private fun PaySheet(accent: Color, onTx: (String) -> Unit, onDone: () -> Unit) 
         Text("📷 SCAN A QR (INVOICE OR ADDRESS)", color = TextMain, style = MaterialTheme.typography.labelSmall)
     }
     msg?.let { Text(it, color = Bad, style = MaterialTheme.typography.bodySmall) }
-    PayLn(accent, invoice, onDone)
+    PayLn(accent, invoice, channels, onDone)
     PayOnchain(accent, onchain, onTx)
 }
 

@@ -349,6 +349,24 @@ private fun CoinPicker(
     val exact = amount + CoinjoinTx.feeShare(feeRate, false, 1, type)
     var making by remember { mutableStateOf(false) }
     var offerPerfect by remember { mutableStateOf(false) }
+    // The exact coin was just sent: wait for its first confirmation, then pick it and go on by
+    // ourselves (the next step is the usual fingerprint for the seat).
+    var waitingExact by remember { mutableStateOf(false) }
+    LaunchedEffect(waitingExact) {
+        if (!waitingExact) return@LaunchedEffect
+        while (waitingExact) {
+            kotlinx.coroutines.delay(30_000)
+            vm.refresh(com.kilombino.pyblockwatch.chain.Chain.BLAKE2B)
+            kotlinx.coroutines.delay(5_000)
+            val found = runCatching { vm.coinjoinCoins(tag) }.getOrNull()?.firstOrNull { it.value == exact }
+            if (found != null) {
+                waitingExact = false
+                coins = runCatching { vm.coinjoinCoins(tag) }.getOrNull()
+                chosen.clear(); chosen.add(found)
+                onPicked(listOf(found))
+            }
+        }
+    }
     val total = chosen.sumOf { it.value }
     val change = if (chosen.isEmpty()) null else CoinjoinTx.change(total, amount, feeRate, chosen.size, type)
     val fee = if (change == null) 0L else total - amount - change
@@ -372,8 +390,17 @@ private fun CoinPicker(
         SectionLabel(title, accent)
         Spacer(Modifier.height(8.dp))
         if (making) {
-            ExactCoinPanel(vm, accent, exact, tag) { making = false; reload++ }
+            ExactCoinPanel(vm, accent, exact, tag) { sent -> making = false; reload++; if (sent) waitingExact = true }
             return@Panel
+        }
+        if (waitingExact) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                PulseDot(accent); Spacer(Modifier.width(8.dp))
+                Text("Waiting for the exact coin's first confirmation (about 10 minutes). Leave this open: it is picked and the pool goes on by itself.",
+                    style = MaterialTheme.typography.bodySmall, color = TextSoft)
+            }
+            TextButton(onClick = { waitingExact = false }) { Text("stop waiting", color = TextFaint) }
+            Spacer(Modifier.height(8.dp))
         }
         Explain(if (maxInputs > 1)
             "Pick up to $maxInputs confirmed $kind coins that together make at least ${groupSats(amount)} sats plus your fee. " +
@@ -775,7 +802,7 @@ private fun askBatteryFree(ctx: android.content.Context) {
  * coin (it is what the round will pay), it says nothing about how busy the mempool is now.
  */
 @Composable
-private fun ExactCoinPanel(vm: WalletViewModel, accent: Color, exact: Long, tag: ScriptType?, onDone: () -> Unit) {
+private fun ExactCoinPanel(vm: WalletViewModel, accent: Color, exact: Long, tag: ScriptType?, onDone: (sent: Boolean) -> Unit) {
     val activity = LocalContext.current as FragmentActivity
     val state by vm.state.collectAsState()
     var sources by remember { mutableStateOf<List<Scanner.SpendableUtxo>?>(null) }
@@ -844,7 +871,7 @@ private fun ExactCoinPanel(vm: WalletViewModel, accent: Color, exact: Long, tag:
             val rate = rateText.toDoubleOrNull()?.takeIf { it in 0.1..1000.0 }
             Spacer(Modifier.height(6.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = onDone, colors = ButtonDefaults.buttonColors(containerColor = PanelSoft, contentColor = TextSoft),
+                Button(onClick = { onDone(false) }, colors = ButtonDefaults.buttonColors(containerColor = PanelSoft, contentColor = TextSoft),
                     shape = RoundedCornerShape(12.dp), modifier = Modifier.weight(1f)) { Text("CANCEL") }
                 Button(onClick = { rate?.let { vm.prepareExactCoin(exact, it, tag, picked.toList()); started = true } },
                     enabled = rate != null && sources != null && (picked.isEmpty() || picked.sumOf { it.value } >= exact),
@@ -879,12 +906,12 @@ private fun ExactCoinPanel(vm: WalletViewModel, accent: Color, exact: Long, tag:
                 }
             }
             is SendPhase.Sent -> {
-                Text("Sent ✓ — it will appear above after one confirmation.", color = Good, style = MaterialTheme.typography.bodySmall)
-                TextButton(onClick = { vm.resetSend(); onDone() }) { Text("ok", color = TextSoft) }
+                Text("Sent ✓ — the pool goes ahead by itself once it has one confirmation.", color = Good, style = MaterialTheme.typography.bodySmall)
+                LaunchedEffect(Unit) { kotlinx.coroutines.delay(1_500); vm.resetSend(); onDone(true) }
             }
             is SendPhase.Failed -> {
                 Text(p.message, color = Bad, style = MaterialTheme.typography.bodySmall)
-                TextButton(onClick = { vm.resetSend(); onDone() }) { Text("close", color = TextSoft) }
+                TextButton(onClick = { vm.resetSend(); onDone(false) }) { Text("close", color = TextSoft) }
             }
             else -> Text("preparing…", color = TextSoft, style = MaterialTheme.typography.bodySmall)
         }

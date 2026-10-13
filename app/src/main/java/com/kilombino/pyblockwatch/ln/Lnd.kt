@@ -221,12 +221,12 @@ object Lnd {
 
     data class Channel(
         val active: Boolean, val peer: String, val point: String, val capacity: Long,
-        val local: Long, val remote: Long, val peerAlias: String,
+        val local: Long, val remote: Long, val peerAlias: String, val chanId: Long = 0,
     )
 
     suspend fun channels(): List<Channel> =
         call { Lndmobile.listChannels(Pb().bool(6, true).build(), it) }.msgs(11).map {
-            Channel(it.bool(1), it.string(2), it.string(3), it.long(5), it.long(6), it.long(7), it.string(34))
+            Channel(it.bool(1), it.string(2), it.string(3), it.long(5), it.long(6), it.long(7), it.string(34), it.long(4))
         }
 
     data class Pending(val peer: String, val point: String, val capacity: Long, val local: Long, val confirmationsLeft: Int)
@@ -456,10 +456,13 @@ object Lnd {
         }.string(2)
 
     /** Pays [invoice] (routerrpc.SendPaymentV2); returns the preimage, or throws with why it failed. */
-    suspend fun pay(invoice: String, feeLimitSats: Long, timeoutSeconds: Int = 60): String =
+    suspend fun pay(invoice: String, feeLimitSats: Long, timeoutSeconds: Int = 60, outgoingChanId: Long? = null): String =
         suspendCancellableCoroutine { cont ->
-            // routerrpc.SendPaymentRequest: payment_request=5, timeout_seconds=6, fee_limit_sat=7.
-            val req = Pb().string(5, invoice.trim()).int(6, timeoutSeconds).int(7, feeLimitSats).build()
+            // routerrpc.SendPaymentRequest: payment_request=5, timeout_seconds=6, fee_limit_sat=7,
+            // outgoing_chan_ids=19 (only through that channel).
+            val b = Pb().string(5, invoice.trim()).int(6, timeoutSeconds).int(7, feeLimitSats)
+            outgoingChanId?.let { b.int(19, it) }
+            val req = b.build()
             stream({ Lndmobile.routerSendPaymentV2(req, it) }, onMsg = { p ->
                 // lnrpc.Payment: status=10 (2 SUCCEEDED, 3 FAILED), payment_preimage=6, failure_reason=16.
                 when (p.int(10)) {
