@@ -158,6 +158,8 @@ private fun RestoreChannels(accent: Color) {
 @Composable
 private fun LnIntro(accent: Color, onTurnOn: ((String) -> Unit) -> Unit) {
     var agreed by remember { mutableStateOf(false) }
+    val ctx = LocalContext.current
+    var alias by remember { mutableStateOf(Lightning.alias(ctx)) }
     var error by remember { mutableStateOf<String?>(null) }
     Panel(accent = accent) {
         SectionLabel("Lightning · beta", accent)
@@ -184,7 +186,9 @@ private fun LnIntro(accent: Color, onTurnOn: ((String) -> Unit) -> Unit) {
             Text("I understand, it is a beta", style = MaterialTheme.typography.bodySmall, color = TextMain)
         }
         if (Lnd.stoppedThisRun) Text("Close the app with the power button (top right) and open it again to turn Lightning on.", style = MaterialTheme.typography.bodySmall, color = Warn)
-        Button(onClick = { error = null; onTurnOn { error = it } }, enabled = agreed && !Lnd.stoppedThisRun, modifier = Modifier.fillMaxWidth(),
+        OutlinedTextField(alias, { alias = it.take(32) }, label = { Text("Your node's name (peers see it)") }, singleLine = true,
+            modifier = Modifier.fillMaxWidth())
+        Button(onClick = { Lightning.setAlias(ctx, alias); error = null; onTurnOn { error = it } }, enabled = agreed && !Lnd.stoppedThisRun, modifier = Modifier.fillMaxWidth(),
             colors = ButtonDefaults.buttonColors(containerColor = accent)) { Text("TURN ON LIGHTNING") }
         error?.let { Text(it, color = Bad, style = MaterialTheme.typography.bodySmall) }
     }
@@ -296,6 +300,7 @@ private fun LnNode(s: Lightning.Status.Running, accent: Color, settings: Boolean
     }
 
     if (settings) {
+        AliasPanel(accent, s.info.alias)
         FeeLimitPanel(accent)
         ConnectPeer(accent)
         LnLog(accent)
@@ -1092,5 +1097,21 @@ private fun FeeLimitPanel(accent: Color) {
         OutlinedTextField(min, { v -> min = v.filter(Char::isDigit); Lightning.setFeeLimit(ctx, pct, min.toLongOrNull() ?: 0L) },
             label = { Text("Minimum (sats)") }, singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
+    }
+}
+
+/** Renames the node: saved now, used from the next start (LND reads it from its configuration). */
+@Composable
+private fun AliasPanel(accent: Color, current: String) {
+    val ctx = LocalContext.current
+    var alias by remember { mutableStateOf(Lightning.alias(ctx)) }
+    var saved by remember { mutableStateOf(false) }
+    Panel(accent = accent) {
+        SectionLabel("Node name", accent)
+        Spacer(Modifier.height(6.dp))
+        Explain("What peers see your node as. Now: " + current.ifBlank { "—" } + ". A new name takes effect the next time the app starts.")
+        OutlinedTextField(alias, { alias = it.take(32); saved = false }, label = { Text("name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        TextButton(enabled = alias.isNotBlank(), onClick = { Lightning.setAlias(ctx, alias); saved = true }) { Text("SAVE", color = accent) }
+        if (saved) Text("Saved: close and reopen the app to use it.", style = MaterialTheme.typography.bodySmall, color = Good)
     }
 }

@@ -96,6 +96,21 @@ object Lightning {
 
     fun markOff() { _status.value = Status.Off }
 
+    /**
+     * The node's name, which peers see. Chosen when turning Lightning on; until then a name with
+     * a random tag, so not every phone is called the same. Takes effect on the next start.
+     */
+    fun alias(ctx: Context): String {
+        val p = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        p.getString("alias", null)?.let { return it }
+        val a = "Kilowallet-" + java.security.SecureRandom().nextInt(0x10000).toString(16).padStart(4, '0')
+        p.edit().putString("alias", a).apply()
+        return a
+    }
+    fun setAlias(ctx: Context, a: String) =
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putString("alias", a.trim().take(32).ifBlank { alias(ctx) }).apply()
+
     /** The routing fee a payment may cost at most: [feePercent] of it, never under [feeMinSats]. */
     fun feeLimit(ctx: Context, sats: Long): Long {
         val p = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -177,7 +192,7 @@ object Lightning {
             (com.kilombino.pyblockwatch.chain.Tor.proxy(60_000)?.address() as? java.net.InetSocketAddress)?.port
         } else null
         if (!Lnd.running) {
-            Lnd.writeConfig(app, peers(app), tor)
+            Lnd.writeConfig(app, peers(app), tor, alias(app))
             Lnd.start(app)
         }
         // The wallet RPC comes first; the main RPC once the wallet is open.
