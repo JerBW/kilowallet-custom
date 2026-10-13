@@ -1,5 +1,6 @@
 package com.kilombino.pyblockwatch.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -253,7 +254,7 @@ private fun LnNode(s: Lightning.Status.Running, accent: Color, settings: Boolean
     }
 
     when (sheet) {
-        LnSheet.Fund -> FundSheet(accent)
+        LnSheet.Fund -> FundSheet(accent) { showTx = "On-chain transaction" to it }
         LnSheet.Open -> OpenSheet(accent, b?.onchainConfirmed ?: 0, onTx = { showTx = "Funding transaction" to it }) { sheet = LnSheet.None }
         LnSheet.Receive -> { ReceiveLn(accent, i.syncedChain && s.channels.any { it.active }); Movements(accent, book.filter { it.delta > 0 }, "Invoices paid to you") }
         LnSheet.Pay -> { PaySheet(accent, onTx = { showTx = "On-chain payment" to it }) { sheet = LnSheet.None }; Movements(accent, book.filter { it.delta < 0 }, "Payments you made") }
@@ -261,7 +262,8 @@ private fun LnNode(s: Lightning.Status.Running, accent: Color, settings: Boolean
     }
 
     if (s.pending.isNotEmpty() || s.channels.isNotEmpty() || s.closing.isNotEmpty()) Panel(accent = accent) {
-        SectionLabel("Channels", accent)
+        SectionLabel("Channels (${s.channels.size}" + (if (s.pending.isNotEmpty()) " · ${s.pending.size} opening" else "") +
+            (if (s.closing.isNotEmpty()) " · ${s.closing.size} closing" else "") + ")", accent)
         s.pending.forEach { p ->
             Spacer(Modifier.height(6.dp))
             Text(p.peer.take(16) + "…  " + street(groupSats(p.capacity)) + " sats", style = MaterialTheme.typography.bodySmall, color = TextMain)
@@ -316,12 +318,53 @@ private fun LnNode(s: Lightning.Status.Running, accent: Color, settings: Boolean
 }
 
 @Composable
-private fun FundSheet(accent: Color) {
+private fun FundSheet(accent: Color, onTx: (String) -> Unit) {
     val clip = LocalClipboardManager.current
     var addr by remember { mutableStateOf<String?>(null) }
     var err by remember { mutableStateOf<String?>(null) }
+    var coins by remember { mutableStateOf<List<Lnd.Utxo>>(emptyList()) }
+    var txs by remember { mutableStateOf<List<Lnd.ChainTx>>(emptyList()) }
     LaunchedEffect(Unit) {
         runCatching { withContext(Dispatchers.IO) { Lnd.newAddress() } }.onSuccess { addr = it }.onFailure { err = it.message }
+        while (true) {
+            coins = runCatching { withContext(Dispatchers.IO) { Lnd.utxos() } }.getOrDefault(coins)
+            txs = runCatching { withContext(Dispatchers.IO) { Lnd.transactions() } }.getOrDefault(txs)
+            kotlinx.coroutines.delay(15_000)
+        }
+    }
+    val fmt = remember { java.text.SimpleDateFormat("d MMM HH:mm", java.util.Locale.getDefault()) }
+    // Shown after the address panel below: the node's coins, then its on-chain movements.
+    val lists: @Composable () -> Unit = {
+        if (coins.isNotEmpty()) Panel(accent = accent) {
+            SectionLabel("Coins in the node (${coins.size})", accent)
+            coins.forEach { u ->
+                Spacer(Modifier.height(6.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(u.outpoint.take(14) + "…:" + u.outpoint.substringAfter(':'), style = MaterialTheme.typography.bodySmall, color = TextMain)
+                        Text(if (u.confirmations > 0) "${u.confirmations} conf" else "unconfirmed",
+                            style = MaterialTheme.typography.labelSmall, color = if (u.confirmations > 0) Good else Warn)
+                    }
+                    Text(street(groupSats(u.sats)), style = MaterialTheme.typography.bodyMedium, color = TextMain)
+                }
+            }
+        }
+        if (txs.isNotEmpty()) Panel(accent = accent) {
+            SectionLabel("On-chain movements", accent)
+            txs.take(30).forEach { t ->
+                Spacer(Modifier.height(6.dp))
+                Row(Modifier.fillMaxWidth().clickable { onTx(t.txid) }, verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(txKind(t), style = MaterialTheme.typography.bodySmall, color = TextMain)
+                        Text((if (t.time > 0) fmt.format(java.util.Date(t.time * 1000)) + " · " else "") +
+                            (if (t.confirmations > 0) "${t.confirmations} conf" else "unconfirmed") + " · " + t.txid.take(10) + "…",
+                            style = MaterialTheme.typography.labelSmall, color = if (t.confirmations > 0) TextFaint else Warn)
+                    }
+                    Text((if (t.sats >= 0) "+" else "−") + street(groupSats(kotlin.math.abs(t.sats))),
+                        style = MaterialTheme.typography.bodyMedium, color = if (t.sats >= 0) Good else TextSoft)
+                }
+            }
+        }
     }
     Panel(accent = accent) {
         SectionLabel("Fund the node", accent)
@@ -336,6 +379,7 @@ private fun FundSheet(accent: Color) {
         }
         err?.let { Text(it, color = Bad, style = MaterialTheme.typography.bodySmall) }
     }
+    lists()
 }
 
 @Composable
@@ -1113,5 +1157,17 @@ private fun AliasPanel(accent: Color, current: String) {
         OutlinedTextField(alias, { alias = it.take(32); saved = false }, label = { Text("name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         TextButton(enabled = alias.isNotBlank(), onClick = { Lightning.setAlias(ctx, alias); saved = true }) { Text("SAVE", color = accent) }
         if (saved) Text("Saved: close and reopen the app to use it.", style = MaterialTheme.typography.bodySmall, color = Good)
+    }
+}
+
+/** What an on-chain movement of the node was, from LND's label and its amount. */
+private fun txKind(t: Lnd.ChainTx): String {
+    val l = t.label.lowercase()
+    return when {
+        "openchannel" in l -> "channel opened"
+        "closechannel" in l || "close" in l -> "channel closed"
+        "sweep" in l -> "swept back"
+        t.sats >= 0 -> "received"
+        else -> "sent"
     }
 }

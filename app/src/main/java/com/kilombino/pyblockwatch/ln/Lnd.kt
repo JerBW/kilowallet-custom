@@ -289,6 +289,14 @@ object Lnd {
     }
 
     /** Sends the node's on-chain coins to [address]; [all] sweeps everything. Returns the txid. */
+    /** An on-chain transaction of the node: [sats] its effect (+ in, − out), [label] LND's note. */
+    data class ChainTx(val txid: String, val sats: Long, val confirmations: Int, val time: Long, val fee: Long, val label: String)
+
+    suspend fun transactions(): List<ChainTx> =
+        call { Lndmobile.getTransactions(Pb().int(1, 0).int(2, -1).build(), it) }.msgs(1).map {
+            ChainTx(it.string(1), it.long(2), it.int(3), it.long(6), it.long(7), it.string(10))
+        }.sortedByDescending { it.time }
+
     /** One of the node's on-chain coins. [outpoint] is "txid:vout". */
     data class Utxo(val outpoint: String, val address: String, val sats: Long, val confirmations: Long)
 
