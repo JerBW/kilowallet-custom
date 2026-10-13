@@ -275,10 +275,14 @@ object Lnd {
      * that goes off mid-payment never leaves someone else's payment hanging on it (which ends
      * in a force close). Invoices then carry route hints so the channel can still receive.
      */
-    suspend fun openChannel(pubkey: String, sats: Long, satPerVbyte: Long, private: Boolean = true): String {
-        val m = call {
-            Lndmobile.openChannelSync(Pb().string(3, pubkey).int(4, sats).int(1, satPerVbyte).bool(8, private).build(), it)
-        }
+    suspend fun openChannel(pubkey: String, sats: Long, satPerVbyte: Long, private: Boolean = true,
+                            coins: List<String> = emptyList()): String {
+        // Coin control (outpoints, 28): only those coins fund it. With coins and no amount, all
+        // of them go in (fund_max, 26), minus the fee.
+        val all = coins.isNotEmpty() && sats <= 0
+        val req = Pb().string(3, pubkey).int(4, if (all) 0 else sats).int(1, satPerVbyte).bool(8, private).bool(26, all)
+        coins.forEach { c -> req.msg(28, Pb().string(2, c.substringBefore(':')).int(3, c.substringAfter(':').toInt())) }
+        val m = call { Lndmobile.openChannelSync(req.build(), it) }
         // ChannelPoint: funding_txid_bytes (1, little-endian) or funding_txid_str (2).
         val str = m.string(2)
         return if (str.isNotEmpty()) str else m.bytes(1).reversedArray().joinToString("") { "%02x".format(it) }

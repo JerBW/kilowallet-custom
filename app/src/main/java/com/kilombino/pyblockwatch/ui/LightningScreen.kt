@@ -250,9 +250,9 @@ private fun LnNode(s: Lightning.Status.Running, accent: Color, settings: Boolean
 
     when (sheet) {
         LnSheet.Fund -> FundSheet(accent)
-        LnSheet.Open -> OpenSheet(accent, b?.onchainConfirmed ?: 0) { sheet = LnSheet.None }
+        LnSheet.Open -> OpenSheet(accent, b?.onchainConfirmed ?: 0, onTx = { showTx = "Funding transaction" to it }) { sheet = LnSheet.None }
         LnSheet.Receive -> { ReceiveLn(accent, i.syncedChain && s.channels.any { it.active }); Movements(accent, book.filter { it.delta > 0 }, "Invoices paid to you") }
-        LnSheet.Pay -> { PaySheet(accent) { sheet = LnSheet.None }; Movements(accent, book.filter { it.delta < 0 }, "Payments you made") }
+        LnSheet.Pay -> { PaySheet(accent, onTx = { showTx = "On-chain payment" to it }) { sheet = LnSheet.None }; Movements(accent, book.filter { it.delta < 0 }, "Payments you made") }
         LnSheet.None -> {}
     }
 
@@ -334,8 +334,12 @@ private fun FundSheet(accent: Color) {
 }
 
 @Composable
-private fun OpenSheet(accent: Color, onchain: Long, onDone: () -> Unit) {
+private fun OpenSheet(accent: Color, onchain: Long, onTx: (String) -> Unit, onDone: () -> Unit) {
     val scope = rememberCoroutineScope()
+    var coins by remember { mutableStateOf<List<Lnd.Utxo>>(emptyList()) }
+    var picked by remember { mutableStateOf<Set<String>>(emptySet()) }
+    LaunchedEffect(Unit) { coins = runCatching { withContext(Dispatchers.IO) { Lnd.utxos() } }.getOrDefault(emptyList()) }
+    val chosen = coins.filter { it.outpoint in picked }
     var custom by remember { mutableStateOf(true) }
     var node by remember { mutableStateOf("") }
     var amount by remember { mutableStateOf("") }
@@ -353,13 +357,32 @@ private fun OpenSheet(accent: Color, onchain: Long, onDone: () -> Unit) {
             androidx.compose.material3.RadioButton(selected = custom, onClick = { custom = true }); Text("Another node", style = MaterialTheme.typography.bodySmall, color = TextMain)
         }
         if (custom) OutlinedTextField(node, { node = it.trim() }, label = { Text("pubkey@host:port") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-        OutlinedTextField(amount, { amount = it.filter(Char::isDigit) }, label = { Text("Sats (available " + street(groupSats(onchain)) + ")") }, singleLine = true,
+        if (coins.isNotEmpty()) {
+            Text("Coins to use (none ticked: the node chooses)", style = MaterialTheme.typography.bodySmall, color = TextSoft)
+            coins.forEach { u ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    androidx.compose.material3.Checkbox(checked = u.outpoint in picked, onCheckedChange = { on ->
+                        picked = if (on) picked + u.outpoint else picked - u.outpoint
+                    })
+                    Column {
+                        Text(street(groupSats(u.sats)) + " sats", style = MaterialTheme.typography.bodySmall, color = TextMain)
+                        Text(u.outpoint.take(12) + "…:" + u.outpoint.substringAfter(':') + " · " +
+                            (if (u.confirmations > 0) "${u.confirmations} conf" else "unconfirmed"),
+                            style = MaterialTheme.typography.labelSmall, color = TextFaint)
+                    }
+                }
+            }
+        }
+        OutlinedTextField(amount, { amount = it.filter(Char::isDigit) },
+            label = { Text(if (chosen.isNotEmpty()) "Sats (blank = all ticked: " + street(groupSats(chosen.sumOf { it.sats })) + ")"
+                           else "Sats (available " + street(groupSats(onchain)) + ")") }, singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
         OutlinedTextField(fee, { fee = it.filter(Char::isDigit) }, label = { Text("Fee rate (sat/vB)") }, singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
         Explain("Minimum 20,000 sats. Leave some sats on-chain: closing and fee bumps need them. The channel is private: it is not announced and nobody routes other people's payments through your phone.")
         Spacer(Modifier.height(6.dp))
-        Button(enabled = !busy && (amount.toLongOrNull() ?: 0) >= 20_000, modifier = Modifier.fillMaxWidth(),
+        val useAll = chosen.isNotEmpty() && amount.isBlank()
+        Button(enabled = !busy && ((amount.toLongOrNull() ?: 0) >= 20_000 || (useAll && chosen.sumOf { it.sats } > 20_000)), modifier = Modifier.fillMaxWidth(),
             colors = ButtonDefaults.buttonColors(containerColor = accent), onClick = {
                 busy = true; msg = null
                 scope.launch {
@@ -368,10 +391,15 @@ private fun OpenSheet(accent: Color, onchain: Long, onDone: () -> Unit) {
                             val (pk, host) = if (custom) node.substringBefore('@') to node.substringAfter('@', "")
                                              else Lightning.KILOMBINO_NODE to Lightning.KILOMBINO_HOST
                             require(pk.length == 66) { "The node must be pubkey@host:port" }
-                            if (host.isNotEmpty()) Lnd.connect(pk, host)
-                            Lnd.openChannel(pk, amount.toLong(), (fee.toLongOrNull() ?: 1).coerceAtLeast(1))
+                            if (host.isNotEmpty()) {
+                                var last: Throwable? = null; var ok = false
+                                for (t in Lnd.resolved(listOf(host))) { val r = runCatching { Lnd.connect(pk, t) }; if (r.isSuccess) { ok = true; break }; last = r.exceptionOrNull() }
+                                if (!ok) throw last ?: IllegalStateException("could not reach the node")
+                            }
+                            Lnd.openChannel(pk, amount.toLongOrNull() ?: 0, (fee.toLongOrNull() ?: 1).coerceAtLeast(1),
+                                coins = chosen.map { it.outpoint })
                         }
-                    }.onSuccess { msg = "Opening. Funding transaction ${it.take(16)}…; usable once it confirms (the peer decides how many blocks, usually 1 to 3). Save a new backup file (Settings) so it includes this channel." to true; Lightning.refresh() }
+                    }.onSuccess { msg = "Opening: usable once it confirms (the peer decides how many blocks, usually 1 to 3). Save a new backup file (Settings) so it includes this channel." to true; Lightning.refresh(); onTx(it) }
                      .onFailure { msg = (it.message ?: "could not open the channel") to false }
                     busy = false
                 }
@@ -528,7 +556,7 @@ private fun SaveChannelBackup(accent: Color) {
  * start; with no amount, everything ticked goes (minus the fee).
  */
 @Composable
-private fun PayOnchain(accent: Color, scanned: String?) {
+private fun PayOnchain(accent: Color, scanned: String?, onTx: (String) -> Unit) {
     val scope = rememberCoroutineScope()
     val clip = LocalClipboardManager.current
     var coins by remember { mutableStateOf<List<Lnd.Utxo>?>(null) }
@@ -605,7 +633,7 @@ private fun PayOnchain(accent: Color, scanned: String?) {
                             Lnd.sendCoins(address.removePrefix("bitcoin:"), amount.toLongOrNull() ?: 0,
                                 (fee.toLongOrNull() ?: 1).coerceAtLeast(1), all, chosen.map { it.outpoint })
                         }
-                    }.onSuccess { msg = "Sent: transaction ${it.take(16)}…" to true; Lightning.refresh()
+                    }.onSuccess { msg = "Sent." to true; onTx(it); Lightning.refresh()
                         coins = runCatching { withContext(Dispatchers.IO) { Lnd.utxos() } }.getOrNull() }
                      .onFailure { msg = (it.message ?: "could not send") to false }
                     busy = false
@@ -813,7 +841,7 @@ private fun DeleteEmptyNode(accent: Color, s: Lightning.Status.Running) {
  * invoice field; a Bitcoin address or bitcoin: URI to the on-chain payment.
  */
 @Composable
-private fun PaySheet(accent: Color, onDone: () -> Unit) {
+private fun PaySheet(accent: Color, onTx: (String) -> Unit, onDone: () -> Unit) {
     val ctx = LocalContext.current
     var scanning by remember { mutableStateOf(false) }
     var invoice by remember { mutableStateOf<String?>(null) }
@@ -848,7 +876,7 @@ private fun PaySheet(accent: Color, onDone: () -> Unit) {
     }
     msg?.let { Text(it, color = Bad, style = MaterialTheme.typography.bodySmall) }
     PayLn(accent, invoice, onDone)
-    PayOnchain(accent, onchain)
+    PayOnchain(accent, onchain, onTx)
 }
 
 /** Connects to a node by hand (pubkey@host:port): for a peer the wallet does not reach by itself. */
