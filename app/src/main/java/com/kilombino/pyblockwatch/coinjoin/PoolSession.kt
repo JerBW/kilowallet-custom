@@ -479,6 +479,12 @@ class PoolSession(private val env: Env, private val s: State) {
                     s.phase = Phase.ABORTED; s.reason = "the round closed without us"; save()
                     env.event(Event.Aborted(s.poolId, s.reason)); return
                 }
+                // A round smaller than the pool's own minimum mixes too little to be worth signing
+                // (a creator could close it with its own extra seats): leave it.
+                if (seats.size < terms.minPeers) {
+                    s.phase = Phase.ABORTED; s.reason = "the round closed with fewer than ${terms.minPeers} people"; save()
+                    env.event(Event.Aborted(s.poolId, s.reason)); return
+                }
                 s.round = seats.toMutableList(); s.phase = Phase.CLOSING
                 s.phaseDeadline = o.optLong("deadline", at + Protocol.OUTPUTS_SECONDS)
                 save()
