@@ -853,7 +853,8 @@ private fun ScanStatus(cs: ChainState, accent: Color, onRetry: () -> Unit) {
 @Composable
 private fun AddressList(rows: List<AddressRow>, accent: Color, vm: WalletViewModel, chain: Chain, tip: Int) {
     // Only the addresses that hold something now; spent-out ones are history, not coins.
-    val held = rows.filter { it.total > 0 }
+    // In derivation order: account, receive before change, then index.
+    val held = rows.filter { it.total > 0 }.sortedWith(compareBy({ it.type?.ordinal ?: -1 }, { it.chainIndex }, { it.index }))
     if (held.isEmpty()) return
     // The coins in each address, with their height, for the confirmations.
     var coins by remember { mutableStateOf<Map<String, List<Scanner.SpendableUtxo>>?>(null) }
@@ -1231,6 +1232,14 @@ internal fun SettingsPanel(
                     Text("BLUE", color = if (Palette.isBlue) Palette.BLUE.accent else TextFaint, style = MaterialTheme.typography.bodySmall)
                 }
             }
+            // What protects you right now, for checking: the native crypto and the verified headers.
+            val secp = com.kilombino.pyblockwatch.crypto.NativeSecp
+            val spvTip = com.kilombino.pyblockwatch.chain.HeaderChain.tip
+            Text("Crypto: " + (if (secp.ecdhNative) "libsecp256k1 (native, constant time) ✓"
+                    else if (secp.available) "libsecp256k1 for signing, Kotlin for ECDH" else "Kotlin (no native library on this CPU)") +
+                "\nSPV: " + (if (spvTip > com.kilombino.pyblockwatch.chain.HeaderChain.CHECKPOINT_HEIGHT) "BTC headers verified up to block $spvTip ✓"
+                    else "BTC headers not verified yet (after the next look)"),
+                style = MaterialTheme.typography.bodySmall, color = TextFaint)
         }
         Spacer(Modifier.height(6.dp))
         // Another hot wallet takes this one's place on the phone: asked first, like forgetting it.
@@ -1387,10 +1396,9 @@ internal fun MovementsCard(txs: List<TxConf>, accent: Color, explorer: String, v
                         Text(street((if (a >= 0) "+" else "−") + groupSats(kotlin.math.abs(a)) + " $unit"),
                              style = MaterialTheme.typography.bodyMedium, color = if (a >= 0) Good else TextMain)
                     }
-                    // SPV: an incoming payment the server could not prove into a real block.
+                    // SPV: only a transaction the server could not prove into a verified block is marked.
                     if (t.spv == false) Text("⚠ not proven: the server's proof failed. Don't count on it.",
                         style = MaterialTheme.typography.bodySmall, color = Bad)
-                    else if (t.spv == true) Text("✓ proven in its block", style = MaterialTheme.typography.bodySmall, color = TextFaint)
                     after[t.txid]?.let { left ->
                         Text(street("(left: ${groupSats(left)} $unit)"), style = MaterialTheme.typography.bodySmall, color = TextSoft)
                     }

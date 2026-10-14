@@ -59,6 +59,9 @@ object NativeSecp {
         }.getOrElse { false }
     }
 
+    /** Whether secret ECDH and key tweaks run in the library (shown in settings). */
+    val ecdhNative: Boolean get() = available && newOpsOk
+
     /** secret · [point] in constant time, or null without the library (the caller does it in Kotlin). */
     fun ecdh(secret: BigInteger, point: Secp256k1.Point): Secp256k1.Point? {
         if (!available || point.isInfinity || !newOpsOk) return null

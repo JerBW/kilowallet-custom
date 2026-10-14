@@ -58,6 +58,8 @@ data class SendDraft(
      * BTC could not be asked).
      */
     val replayableOnBtc: List<String>? = emptyList(),
+    /** Coinjoin pools (still waiting for people) one of this draft's coins is seated in: sending leaves them. */
+    val leavesPools: List<String> = emptyList(),
     /** Set for a CPFP: the stuck transaction this child pulls along, and the pair's fee rate. */
     val cpfpParent: String? = null,
     /** Where the change goes (one of this wallet's addresses), shown in the review; null when there is none. */
@@ -1512,8 +1514,10 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
                 val replayable = if (chain == Chain.SHA256 && chosen.any { it.height in 1 until Chain.BLAKE2B_FORK_HEIGHT })
                     preForkOnBtc(chosen) else emptyList()
                 // The review shows what will really be paid: the resolved address, next to the handle.
+                val seated = if (chain == Chain.BLAKE2B) com.kilombino.pyblockwatch.coinjoin.CoinjoinHub.waitingOutpoints(getApplication()) else emptyMap()
                 val draft = SendDraft(effectiveTo, amountSats, fee, change, chosen, outputs, chain, silentRecipient,
                     replayableOnBtc = replayable,
+                    leavesPools = chosen.mapNotNull { seated["${it.txid}:${it.vout}"] }.distinct(),
                     extra = extra.mapIndexed { i, (a, v) -> (resolvedExtra[i] ?: a) to v },
                     handle = if (toAddress.contains("@")) toAddress.trim() else null,
                     changeAddress = if (change > 0) runCatching { scriptToAddress(changeScript) }.getOrNull() else null)
@@ -1850,6 +1854,8 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
                     scanner.broadcast(signed.rawHex, endpoint, pin)
                 }
                 _state.update { it.copy(sendPhase = SendPhase.Sent(txid)) }
+                // A coin of a waiting pool went: give up that seat, so the pool doesn't wait on it.
+                com.kilombino.pyblockwatch.coinjoin.CoinjoinHub.leavePools(getApplication(), draft.leavesPools)
                 exact?.let { (i, tag, value) -> exactKey?.let { k -> runCatching { expectPerfectCoin(txid, draft, i, tag, value, k) } } }
                 exactFor = null; exactPending = null
                 refresh(chain)
@@ -2060,6 +2066,11 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
      * in sendPhase for the screen to show and confirm with the fingerprint.
      */
     /** A coin that came out of a coinjoin: kept by this wallet, or recognised on the chain ([checkMixed]). */
+    /** Outpoints seated in a coinjoin pool still waiting for people (spendable; sending leaves the pool). */
+    fun seatedInWaitingPools(): Set<String> =
+        if (_state.value.selected != Chain.BLAKE2B) emptySet()
+        else com.kilombino.pyblockwatch.coinjoin.CoinjoinHub.waitingOutpoints(getApplication()).keys
+
     fun isMixedCoin(u: Scanner.SpendableUtxo): Boolean {
         val ctx = getApplication<android.app.Application>()
         return with(com.kilombino.pyblockwatch.crypto.Hashes) { coinScript(u).toHex() } in com.kilombino.pyblockwatch.coinjoin.MixedCoins.scripts(ctx) ||

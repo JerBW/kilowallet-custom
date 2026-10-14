@@ -112,10 +112,30 @@ object CoinjoinHub {
     /** Coins already promised to a pool that is not over: a normal send must leave them alone. */
     fun lockedOutpoints(ctx: Context): Set<String> {
         load(ctx)
+        // Only a round being built (outputs posted, signatures asked) holds its coins: spending
+        // one then would spoil it for everyone. A pool still waiting for people, or voting,
+        // lets its coins be spent ([waitingOutpoints]); the spend leaves that pool.
         return synchronized(this) {
-            sessions.values.filter { !it.done && it.state.phase != PoolSession.Phase.BROADCAST }
+            sessions.values.filter { !it.done && it.state.phase in setOf(PoolSession.Phase.CLOSING, PoolSession.Phase.SIGNING) }
                 .flatMap { st -> st.state.seat.coins.map { it.outpoint } }.toSet()
         }
+    }
+
+    /** Coins seated in a pool that has not started its round, outpoint → pool id: spendable, at the cost of the seat. */
+    fun waitingOutpoints(ctx: Context): Map<String, String> {
+        load(ctx)
+        return synchronized(this) {
+            sessions.values.filter { !it.done && it.state.phase in setOf(PoolSession.Phase.JOINING, PoolSession.Phase.OPEN, PoolSession.Phase.VOTING) }
+                .flatMap { st -> st.state.seat.coins.map { it.outpoint to st.state.poolId } }.toMap()
+        }
+    }
+
+    /** Give up the seats of [poolIds] (their coin was just spent): the others are told, off the main thread. */
+    fun leavePools(ctx: Context, poolIds: Collection<String>) {
+        if (poolIds.isEmpty()) return
+        load(ctx)
+        val ss = synchronized(this) { poolIds.mapNotNull { sessions[it] } }
+        Thread { ss.forEach { runCatching { it.leave() } } }.start()
     }
 
     /** Start every live session; called by the service. */

@@ -627,6 +627,10 @@ fun SendSheet(vm: WalletViewModel, accent: Color, onClose: () -> Unit) {
                         }
                     }
                 }
+                if (d.leavesPools.isNotEmpty())
+                    Text("Some of these coins are seated in ${d.leavesPools.size} coinjoin pool" +
+                        (if (d.leavesPools.size == 1) "" else "s") + " still waiting for people: sending gives up that seat.",
+                        color = Warn, style = MaterialTheme.typography.bodySmall)
                 RowLine("Fee", "${groupSats(d.fee)} sats", accent)
                 RowLine("Change", if (d.change > 0) "${groupSats(d.change)} sats" else "—", accent)
                 d.changeAddress?.let {
@@ -814,6 +818,7 @@ fun SendSheet(vm: WalletViewModel, accent: Color, onClose: () -> Unit) {
                             Text("No spendable coins on this chain.", color = TextFaint,
                                  style = MaterialTheme.typography.bodySmall)
                         }
+                        val seatedOutpoints = remember(utxos) { vm.seatedInWaitingPools() }
                         utxos.forEach { u ->
                             val key = "${u.txid}:${u.vout}"
                             val sel = key in selectedOutpoints
@@ -833,6 +838,12 @@ fun SendSheet(vm: WalletViewModel, accent: Color, onClose: () -> Unit) {
                                         " · m/…/${u.chainIndex}/${u.index}" +
                                         (if (u.height <= 0) " · 0 conf" else ""),
                                          color = TextFaint, style = MaterialTheme.typography.bodySmall)
+                                    // Mixed by a coinjoin, or seated in a pool still waiting: both spendable, said so.
+                                    val mixed = state.selected == com.kilombino.pyblockwatch.chain.Chain.BLAKE2B && vm.isMixedCoin(u)
+                                    val inPool = key in seatedOutpoints
+                                    if (mixed || inPool) Text(listOfNotNull(if (mixed) "🌀 mixed" else null,
+                                            if (inPool) "in a pool waiting for people: sending it leaves that pool" else null).joinToString(" · "),
+                                        color = if (inPool) Warn else Good, style = MaterialTheme.typography.bodySmall)
                                 }
                             }
                         }
