@@ -82,12 +82,15 @@ object RoundNotifications {
         val counting = st.phase == PoolSession.Phase.OPEN && st.terms.expiresAt > System.currentTimeMillis() / 1000
 
         fun views(layout: Int, big: Boolean) = RemoteViews(ctx.packageName, layout).apply {
-            // Folded there is room for one line: the amount with its step.
-            setTextViewText(R.id.cj_title, if (big) title else title + when {
-                st.phase == PoolSession.Phase.OPEN -> " · $people/${st.terms.maxPeers} people"
-                step in 1 until STEPS -> " · step $step of $STEPS"
-                step == STEPS -> " · Confirmed"
-                else -> " · Cancelled"
+            // Folded there is room for one line: the amount and the people (the dots say the step).
+            setTextViewText(R.id.cj_title, if (big) title else "${sats(st.terms.amount, masked)} sats · " + when (st.phase) {
+                PoolSession.Phase.JOINING -> "joining"
+                PoolSession.Phase.OPEN -> "$people/${st.terms.maxPeers} people"
+                PoolSession.Phase.VOTING -> "$people people · vote"
+                PoolSession.Phase.CLOSING, PoolSession.Phase.SIGNING -> "$people people · signing"
+                PoolSession.Phase.BROADCAST -> "$people people · sent"
+                PoolSession.Phase.CONFIRMED -> "confirmed"
+                else -> "cancelled"
             })
             setTextViewText(R.id.cj_status, status)
             setTextColor(R.id.cj_status, color)
