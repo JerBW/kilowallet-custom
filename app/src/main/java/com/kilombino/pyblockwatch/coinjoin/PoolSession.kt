@@ -212,6 +212,10 @@ class PoolSession(private val env: Env, private val s: State) {
             .put("#p", org.json.JSONArray().put(joinPub))))
         r.subscribe("pool", listOf(JSONObject().put("kinds", org.json.JSONArray().put(Protocol.KIND_MSG))
             .put("#p", org.json.JSONArray().put(terms.poolPub))))
+        // The pool's public listing, which its creator re-announces while it is alive: how the
+        // others find out that the creator's app is gone, as the pool bot does.
+        if (!s.creator) r.subscribe("listing", listOf(JSONObject().put("kinds", org.json.JSONArray().put(Protocol.KIND_POOL))
+            .put("authors", org.json.JSONArray().put(terms.poolPub)).put("#d", org.json.JSONArray().put(terms.id))))
         if (s.phase == Phase.JOINING && !s.creator) sendJoin()
         if (s.creator && s.phase == Phase.JOINING) creatorStart()
     }
@@ -284,7 +288,18 @@ class PoolSession(private val env: Env, private val s: State) {
 
     // ------------------------------------------------------------------------------- receiving
 
+    /**
+     * When the pool was last announced; 0 until the relay has said. Only its age is used: the
+     * others hold the pool key too, so what an announcement says could be one of them, but
+     * keeping it fresh can only make this wait for the pool's own deadlines.
+     */
+    @Volatile private var listedAt = 0L
+
     private fun onEvent(ev: NostrEvent) {
+        if (ev.kind == Protocol.KIND_POOL) {
+            if (ev.pubkey == terms.poolPub && ev.tag("d") == terms.id && ev.createdAt > listedAt) listedAt = ev.createdAt
+            return
+        }
         if (ev.kind != Protocol.KIND_MSG) return
         env.log("event from ${ev.pubkey.take(8)} p=${ev.tag("p")?.take(8)}")
         synchronized(this) {
@@ -664,6 +679,15 @@ class PoolSession(private val env: Env, private val s: State) {
             // gone stops being listed (see CoinjoinHub.fetchPools) instead of taking join requests
             // nobody will ever answer.
             if (s.creator && s.phase in setOf(Phase.OPEN, Phase.VOTING) && now - lastAnnounce > Protocol.HEARTBEAT) announce()
+            // A creator that stopped re-announcing (every HEARTBEAT while open) is gone and will
+            // not take the round anywhere: let it go instead of showing it until it expires.
+            if (!s.creator && s.phase in setOf(Phase.JOINING, Phase.OPEN, Phase.VOTING) && listedAt > 0 &&
+                now - listedAt > Protocol.STALE_AFTER) {
+                s.phase = Phase.ABORTED
+                s.reason = "the pool's creator stopped answering"
+                save(); env.event(Event.Aborted(s.poolId, s.reason))
+                return@runCatching
+            }
             when (s.phase) {
                 Phase.OPEN, Phase.JOINING -> if (s.phase == Phase.OPEN && !s.warnedExpiry && now <= terms.expiresAt &&
                     terms.expiresAt - now <= EXPIRY_WARN_SECONDS && s.seats.size >= terms.minPeers && s.seats.size < terms.maxPeers) {
@@ -680,7 +704,16 @@ class PoolSession(private val env: Env, private val s: State) {
                     s.reason = "the pool did not answer (it may have ended, or its creator's app is closed)"
                     save(); env.event(Event.Aborted(s.poolId, s.reason))
                 }
-                Phase.VOTING -> if (s.creator && now > s.voteDeadline) {
+                Phase.VOTING -> if (now > terms.expiresAt) {
+                    // A vote does not keep a pool alive past its own expiry.
+                    if (s.creator) abort("the pool expired") else { s.phase = Phase.ABORTED; s.reason = "the pool expired"; save(); env.event(Event.Aborted(s.poolId, s.reason)) }
+                } else if (!s.creator && now > s.voteDeadline + VOTE_GRACE) {
+                    // Only the creator ends a vote, by closing or reopening. Nothing came: its app
+                    // is gone, and waiting would show this round forever. The coin never left.
+                    s.phase = Phase.ABORTED
+                    s.reason = "the pool's creator stopped answering"
+                    save(); env.event(Event.Aborted(s.poolId, s.reason))
+                } else if (s.creator && now > s.voteDeadline) {
                     // Whoever did not answer is left out, if two or more said yes.
                     val yes = s.seats.filter { it.tokenHash in s.accepts }
                     if (yes.size >= terms.minPeers) callClosing(yes, "agreed")
@@ -713,6 +746,8 @@ class PoolSession(private val env: Env, private val s: State) {
         const val LEFT_BY_CHOICE = "you left this round"
         /** Seconds a join request waits for the creator's answer. */
         const val JOIN_TIMEOUT = 5 * 60
+        /** Seconds past a vote's deadline the others wait for the creator to close or reopen. */
+        const val VOTE_GRACE = 3 * 60L
         /** Seconds before expiry when a pool that could close is called out. */
         const val EXPIRY_WARN_SECONDS = 3600
 
