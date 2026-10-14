@@ -1939,10 +1939,31 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
      * (reserved on both chains). It goes through the normal send review: the draft is left
      * in sendPhase for the screen to show and confirm with the fingerprint.
      */
-    /** A coin that came out of a coinjoin round of this wallet. */
+    /** A coin that came out of a coinjoin: kept by this wallet, or recognised on the chain ([checkMixed]). */
     fun isMixedCoin(u: Scanner.SpendableUtxo): Boolean {
-        val mixed = com.kilombino.pyblockwatch.coinjoin.CoinjoinHub.states.value.map { it.mixScript.toList() }.toSet()
-        return coinScript(u).toList() in mixed
+        val ctx = getApplication<android.app.Application>()
+        return with(com.kilombino.pyblockwatch.crypto.Hashes) { coinScript(u).toHex() } in com.kilombino.pyblockwatch.coinjoin.MixedCoins.scripts(ctx) ||
+            com.kilombino.pyblockwatch.coinjoin.MixedCoins.known(ctx, "${u.txid}:${u.vout}") == true
+    }
+
+    /** Asks the chain about the coins this wallet does not remember as mixed (once per coin). */
+    private suspend fun checkMixed(coins: List<Scanner.SpendableUtxo>) {
+        val ctx = getApplication<android.app.Application>()
+        val ask = coins.filter { !isMixedCoin(it) && com.kilombino.pyblockwatch.coinjoin.MixedCoins.known(ctx, "${it.txid}:${it.vout}") == null }
+        if (ask.isEmpty()) return
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching {
+                val e = store.endpoint(Chain.BLAKE2B)
+                val c = com.kilombino.pyblockwatch.chain.ElectrumClient(e, store.pinnedFingerprint(e))
+                try {
+                    c.connect()
+                    for (u in ask) runCatching {
+                        com.kilombino.pyblockwatch.coinjoin.MixedCoins.remember(ctx, "${u.txid}:${u.vout}",
+                            com.kilombino.pyblockwatch.coinjoin.MixedCoins.looksMixed(c.transaction(u.txid), u.vout))
+                    }
+                } finally { c.close() }
+            }
+        }
     }
 
     /**
@@ -1958,8 +1979,9 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
         val u = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             scanner.gatherUtxos(cs.rows.filter { it.isUsed }, endpoint, store.pinnedFingerprint(endpoint))
         }
-        return notInCoinjoin(Chain.BLAKE2B, u).filter { it.height > 0 && (mixedToo || coinScript(it).toList() !in mixed) }
-            .sortedByDescending { it.value }
+        val coins = notInCoinjoin(Chain.BLAKE2B, u).filter { it.height > 0 }
+        checkMixed(coins)
+        return coins.filter { mixedToo || (coinScript(it).toList() !in mixed && !isMixedCoin(it)) }.sortedByDescending { it.value }
     }
 
     /** "Taproot" or "SegWit": which kind of coin [u] is. */

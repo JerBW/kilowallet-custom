@@ -73,6 +73,8 @@ object CoinjoinHub {
         appCtx = ctx.applicationContext
         _states.value = sessions.values.map { it.state }.sortedByDescending { it.created }
         _version.value++
+        // Rounds are dropped after a week: their mixed outputs are kept for good first.
+        runCatching { MixedCoins.keep(ctx) }
     }
 
     /** Whether this user wants to see (and be told about) test pools under 10 000 sats. */
@@ -310,6 +312,7 @@ object CoinjoinHub {
 
     private fun onEvent(ctx: Context, st: PoolSession.State, e: PoolSession.Event) {
         alert(ctx, st, e)
+        if (e is PoolSession.Event.Broadcast || e is PoolSession.Event.Confirmed) runCatching { MixedCoins.keep(ctx) }
         val id = ("cj" + st.poolId).hashCode()
         val pool = "${sats(st.terms.amount)} sats pool"
         when (e) {
