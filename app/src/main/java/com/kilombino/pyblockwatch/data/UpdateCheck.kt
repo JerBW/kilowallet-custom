@@ -32,8 +32,18 @@ object UpdateCheck {
         return cPre && !rPre
     }
 
+    /** What a check found: a newer release, nothing newer, or no answer from GitHub. */
+    sealed class Outcome {
+        class Newer(val release: Release) : Outcome()
+        object UpToDate : Outcome()
+        object Unreachable : Outcome()
+    }
+
     /** The newer release, or null when up to date or unreachable. Blocking: call off the UI thread. */
-    fun check(current: String): Release? = runCatching {
+    fun check(current: String): Release? = (outcome(current) as? Outcome.Newer)?.release
+
+    /** Like [check], telling "nothing newer" from "GitHub did not answer". Blocking. */
+    fun outcome(current: String): Outcome = runCatching<Outcome> {
         val c = URL(API).openConnection() as HttpURLConnection
         c.connectTimeout = 10_000; c.readTimeout = 10_000
         c.setRequestProperty("Accept", "application/vnd.github+json")
@@ -41,11 +51,11 @@ object UpdateCheck {
         val o = JSONObject(c.inputStream.bufferedReader().use { it.readText() })
         c.disconnect()
         val tag = o.getString("tag_name")
-        if (!isNewer(tag, current)) return null
+        if (!isNewer(tag, current)) return Outcome.UpToDate
         val assets = o.optJSONArray("assets")
         val apk = (0 until (assets?.length() ?: 0)).map { assets!!.getJSONObject(it) }
             .firstOrNull { it.optString("name").endsWith(".apk") }?.optString("browser_download_url")
         val sha = Regex("Signed APK SHA-256:\\s*`([0-9a-f]{64})`").find(o.optString("body"))?.groupValues?.get(1)
-        Release(tag.removePrefix("v"), o.getString("html_url"), apk, sha)
-    }.getOrNull()
+        Outcome.Newer(Release(tag.removePrefix("v"), o.getString("html_url"), apk, sha))
+    }.getOrDefault(Outcome.Unreachable)
 }

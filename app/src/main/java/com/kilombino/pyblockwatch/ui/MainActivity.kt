@@ -135,6 +135,8 @@ class MainActivity : FragmentActivity() {
                     // version, and installed from inside the app (AppUpdater).
                     var update by remember { mutableStateOf<com.kilombino.pyblockwatch.data.UpdateCheck.Release?>(null) }
                     var forceAsk by remember { mutableStateOf(0) }
+                    // Asked for with CHECK NOW: offered even during a coinjoin round, saying so.
+                    var asked by remember { mutableStateOf(false) }
                     LaunchedEffect(openTab) {
                         if (openTab == com.kilombino.pyblockwatch.data.OpenTab.UPDATE) {
                             com.kilombino.pyblockwatch.data.OpenTab.flow.value = null; forceAsk++
@@ -143,16 +145,24 @@ class MainActivity : FragmentActivity() {
                     LaunchedEffect(forceAsk) {
                         val prefs = getSharedPreferences("pyblockwatch", MODE_PRIVATE)
                         while (true) {
-                            if (prefs.getBoolean("check_updates", true)) {
+                            // CHECK NOW asks even with the periodic check switched off.
+                            val now = com.kilombino.pyblockwatch.data.OpenTab.checkNow
+                            if (now || prefs.getBoolean("check_updates", true)) {
+                                com.kilombino.pyblockwatch.data.OpenTab.checkNow = false
                                 val current = runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrNull() ?: ""
-                                val r = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                                    com.kilombino.pyblockwatch.data.UpdateCheck.check(current)
+                                val o = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                    com.kilombino.pyblockwatch.data.UpdateCheck.outcome(current)
                                 }
-                                if (r != null && (forceAsk > 0 || prefs.getString("update_dismissed", null) != r.version)) update = r
-                                if (com.kilombino.pyblockwatch.data.OpenTab.checkNow) {
-                                    com.kilombino.pyblockwatch.data.OpenTab.checkNow = false
-                                    if (r == null) android.widget.Toast.makeText(this@MainActivity,
+                                val r = (o as? com.kilombino.pyblockwatch.data.UpdateCheck.Outcome.Newer)?.release
+                                if (r != null && (forceAsk > 0 || prefs.getString("update_dismissed", null) != r.version)) {
+                                    update = r; asked = now
+                                }
+                                if (now) when (o) {
+                                    is com.kilombino.pyblockwatch.data.UpdateCheck.Outcome.Newer -> {}
+                                    com.kilombino.pyblockwatch.data.UpdateCheck.Outcome.UpToDate -> android.widget.Toast.makeText(this@MainActivity,
                                         "You have the latest Kilowallet ($current).", android.widget.Toast.LENGTH_SHORT).show()
+                                    com.kilombino.pyblockwatch.data.UpdateCheck.Outcome.Unreachable -> android.widget.Toast.makeText(this@MainActivity,
+                                        "Could not reach GitHub to check. Try again in a moment.", android.widget.Toast.LENGTH_LONG).show()
                                 }
                             }
                             kotlinx.coroutines.delay(5 * 60 * 1000L)
@@ -165,13 +175,15 @@ class MainActivity : FragmentActivity() {
                     val cjVersion by com.kilombino.pyblockwatch.coinjoin.CoinjoinHub.version.collectAsState()
                     val busy = openFlows.intValue > 0 ||
                         remember(cjVersion) { com.kilombino.pyblockwatch.coinjoin.CoinjoinHub.inRound() }
-                    update?.takeIf { !busy }?.let { r ->
+                    update?.takeIf { !busy || asked }?.let { r ->
                         if (upd is com.kilombino.pyblockwatch.data.AppUpdater.State.Idle) AlertDialog(
                             onDismissRequest = { update = null },
                             title = { Text("Kilowallet ${r.version} is out") },
                             text = { Text("Update now: it downloads here, is checked against the published hash and this " +
                                 "app's certificate, and installs over this one keeping everything." +
-                                (if (r.apkUrl == null) "\n\nThis release has no APK attached: open its page instead." else ""),
+                                (if (r.apkUrl == null) "\n\nThis release has no APK attached: open its page instead." else "") +
+                                (if (busy) "\n\nA coinjoin round of yours is under way: updating now leaves it (your coin " +
+                                    "stays where it is), or choose NOT NOW and update once it is over." else ""),
                                 style = MaterialTheme.typography.bodySmall) },
                             confirmButton = { TextButton(onClick = {
                                 if (r.apkUrl != null) com.kilombino.pyblockwatch.data.AppUpdater.start(this@MainActivity, r)
@@ -1191,6 +1203,12 @@ internal fun SettingsPanel(
                     activity.getSharedPreferences("pyblockwatch", android.content.Context.MODE_PRIVATE).edit().putBoolean("check_updates", it).apply()
                 }, colors = switchColors(accent))
             }
+            // Asks now, even about a version once answered NOT NOW, and with the switch off.
+            TextButton(onClick = {
+                android.widget.Toast.makeText(activity, "Checking GitHub for a newer Kilowallet…", android.widget.Toast.LENGTH_SHORT).show()
+                com.kilombino.pyblockwatch.data.OpenTab.checkNow = true
+                com.kilombino.pyblockwatch.data.OpenTab.flow.value = com.kilombino.pyblockwatch.data.OpenTab.UPDATE
+            }) { Text("CHECK NOW", color = accent, style = MaterialTheme.typography.bodySmall) }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("Street mode", style = MaterialTheme.typography.bodyMedium, color = TextMain)
@@ -1200,11 +1218,6 @@ internal fun SettingsPanel(
                 Switch(checked = StreetMode.byDefault, onCheckedChange = { StreetMode.setByDefault(activity, it) },
                     colors = switchColors(accent))
             }
-            // Asks now, even about a version once answered NOT NOW.
-            TextButton(onClick = {
-                com.kilombino.pyblockwatch.data.OpenTab.checkNow = true
-                com.kilombino.pyblockwatch.data.OpenTab.flow.value = com.kilombino.pyblockwatch.data.OpenTab.UPDATE
-            }) { Text("CHECK NOW", color = accent, style = MaterialTheme.typography.bodySmall) }
         }
         Spacer(Modifier.height(6.dp))
         // Another hot wallet takes this one's place on the phone: asked first, like forgetting it.
