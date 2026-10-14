@@ -27,7 +27,7 @@ object Schnorr {
         val d = if (hasEvenY(p)) internal else N.subtract(internal)
         val t = BigInteger(1, Hashes.taggedHash("TapTweak", Secp256k1.xOnly(p) + (merkleRoot ?: ByteArray(0))))
         require(t < N) { "tweak out of range" }
-        return d.add(t).mod(N).also { require(it.signum() != 0) { "tweaked key is zero" } }
+        return Secp256k1.addSecret(d, t).also { require(it.signum() != 0) { "tweaked key is zero" } }
     }
 
     /** BIP-340 signature of a 32-byte message. [aux] is fresh randomness unless a test pins it. */

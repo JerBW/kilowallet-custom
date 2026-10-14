@@ -59,7 +59,15 @@ object ArkBackup {
         return file[MAGIC.size].toInt() == 1
     }
 
+    /** The shortest password a new backup file takes. */
+    const val MIN_PASSWORD = 8
+
+    /**
+     * The file, always encrypted: a backup without a password would hand the words to whoever
+     * gets the file. Unencrypted files written by older versions still [decode].
+     */
     fun encode(s: Snapshot, password: String?): ByteArray {
+        require(!password.isNullOrEmpty()) { "A backup file needs a password." }
         val json = JSONObject()
             .put("format", "kilombino-ark-backup")
             // Version 2 only when there is a passphrase: an older app, which would restore

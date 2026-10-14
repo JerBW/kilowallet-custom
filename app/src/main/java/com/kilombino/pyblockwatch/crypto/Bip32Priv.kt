@@ -93,7 +93,7 @@ object Bip32Priv {
         val i = Hashes.hmacSha512(parent.chainCode, data)
         val il = BigInteger(1, i.copyOfRange(0, 32))
         require(il < Secp256k1.N) { "derived scalar out of range at index $idx" }
-        val childKey = il.add(parent.key).mod(Secp256k1.N)
+        val childKey = Secp256k1.addSecret(parent.key, il)
         require(childKey.signum() != 0) { "derived zero key at index $idx" }
         return ExtendedPrivKey(childKey, i.copyOfRange(32, 64), parent.depth + 1)
     }

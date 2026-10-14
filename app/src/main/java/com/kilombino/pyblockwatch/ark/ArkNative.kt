@@ -24,4 +24,8 @@ internal object ArkNative {
     external fun secpEcdsaSign(secret: ByteArray, hash: ByteArray, lowR: Boolean): ByteArray?
     /** BIP-340 Schnorr signature. Null if invalid. */
     external fun secpSchnorrSign(secret: ByteArray, msg: ByteArray, aux: ByteArray): ByteArray?
+    /** secret · point (point 33 or 65 bytes), as a 65-byte uncompressed point. Null if invalid. */
+    external fun secpEcdh(secret: ByteArray, point: ByteArray): ByteArray?
+    /** (secret + tweak) mod n, 32 bytes. Null if either is out of range or the sum is zero. */
+    external fun secpTweakAdd(secret: ByteArray, tweak: ByteArray): ByteArray?
 }

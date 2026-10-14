@@ -340,18 +340,18 @@ fun ArkBackupPanel(fingerprint: String?, accent: Color, onMessage: (String) -> U
         val mismatch = pw1 != pw2
         AlertDialog(
             onDismissRequest = { askPassword = false },
-            title = { Text("Protect the file with a password?") },
+            title = { Text("A password for the file") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Strongly recommended. The file contains your words: without a password, anyone who " +
-                        "gets the file can take your money. Never put an unprotected file in cloud storage " +
-                        "(Drive, iCloud…) or send it in a chat. If you forget the password, the file is useless.",
+                    Text("The file contains your words, so it is always encrypted with a password: whoever " +
+                        "gets the file without it cannot use it. If you forget the password, the file is useless: " +
+                        "keep it apart from the file. At least ${ArkBackup.MIN_PASSWORD} characters.",
                         style = MaterialTheme.typography.bodySmall)
                     OutlinedTextField(value = pw1, onValueChange = { pw1 = it },
-                        label = { Text("password (optional)", style = MaterialTheme.typography.bodySmall) },
+                        label = { Text("password", style = MaterialTheme.typography.bodySmall) },
                         singleLine = true, visualTransformation = PasswordVisualTransformation(),
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password))
-                    if (pw1.isNotEmpty()) OutlinedTextField(value = pw2, onValueChange = { pw2 = it },
+                    OutlinedTextField(value = pw2, onValueChange = { pw2 = it },
                         label = { Text("repeat password", style = MaterialTheme.typography.bodySmall) },
                         singleLine = true, visualTransformation = PasswordVisualTransformation(),
                         isError = mismatch && pw2.isNotEmpty(),
@@ -359,8 +359,8 @@ fun ArkBackupPanel(fingerprint: String?, accent: Color, onMessage: (String) -> U
                 }
             },
             confirmButton = {
-                TextButton(enabled = pw1.isEmpty() || !mismatch, onClick = {
-                    val pw = pw1.ifEmpty { null }
+                TextButton(enabled = pw1.length >= ArkBackup.MIN_PASSWORD && !mismatch, onClick = {
+                    val pw = pw1
                     askPassword = false; pw1 = ""; pw2 = ""
                     scope.launch {
                         busy = "Preparing the backup file…"
@@ -374,7 +374,7 @@ fun ArkBackupPanel(fingerprint: String?, accent: Color, onMessage: (String) -> U
                             saveFile.launch("kilombino-ark-$day.kab")
                         }.onFailure { onMessage("Error: ${it.message}") }
                     }
-                }) { Text(if (pw1.isEmpty()) "SAVE WITHOUT PASSWORD" else "SAVE", color = if (pw1.isEmpty()) Warn else accent) }
+                }) { Text("SAVE", color = accent) }
             },
             dismissButton = { TextButton(onClick = { askPassword = false; pw1 = ""; pw2 = "" }) { Text("CANCEL", color = TextSoft) } },
             containerColor = PanelBg, titleContentColor = TextMain, textContentColor = TextSoft,

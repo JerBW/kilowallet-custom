@@ -267,6 +267,14 @@ class ElectrumClient(
         return r.getInt("height")
     }
 
+    /** The server's tip header (hex): 80 bytes on the spamchain, 164 on BTC. */
+    fun tipHeaderHex(): String {
+        if (node != null) throw ElectrumException("no header from a node")
+        val r = call("blockchain.headers.subscribe", JSONArray()) as? JSONObject
+            ?: throw ElectrumException("unexpected response from headers.subscribe")
+        return r.getString("hex")
+    }
+
     fun balance(scriptHash: String): ScriptHashBalance {
         node?.let { return it.balance(scriptHash) }
         val r = call("blockchain.scripthash.get_balance", JSONArray().put(scriptHash)) as? JSONObject
@@ -402,6 +410,23 @@ class ElectrumClient(
             ?: throw ElectrumException("no merkle proof for $txid")
         val m = o.getJSONArray("merkle")
         return (0 until m.length()).map { m.getString(it) } to o.getInt("pos")
+    }
+
+    /**
+     * Raw headers (hex, one per block) from [start], at most [count]; servers cap a call
+     * (usually at 2016) and stop at their tip. Protocol 1.4 answers one hex string, 1.6 a list.
+     */
+    fun headers(start: Int, count: Int): List<String> {
+        if (node != null) throw ElectrumException("no header batches from a node")
+        val o = call("blockchain.block.headers", JSONArray().put(start).put(count)) as? JSONObject
+            ?: throw ElectrumException("unexpected response from block.headers")
+        o.optJSONArray("headers")?.let { a -> return (0 until a.length()).map { a.getString(it) } }
+        val n = o.optInt("count")
+        if (n <= 0) return emptyList()
+        val hex = o.getString("hex")
+        if (hex.length % n != 0) throw ElectrumException("block.headers: ${hex.length / 2} bytes for $n headers")
+        val size = hex.length / n
+        return (0 until n).map { hex.substring(it * size, (it + 1) * size) }
     }
 
     /** The raw header (hex) of block [height]. */

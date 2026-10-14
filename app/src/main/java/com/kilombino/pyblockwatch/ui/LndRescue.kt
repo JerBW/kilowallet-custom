@@ -205,7 +205,9 @@ fun LndRescuePanel(vm: WalletViewModel, accent: Color) {
                 OutlinedTextField(value = gap, onValueChange = { gap = it.filter(Char::isDigit) },
                     label = { Text("gap: unused addresses before stopping", style = MaterialTheme.typography.bodySmall) },
                     textStyle = MaterialTheme.typography.bodySmall, singleLine = true, modifier = Modifier.fillMaxWidth())
-                var useSha by remember { mutableStateOf(vm.spamchainConsent) }
+                // Off until ticked here, even after the spamchain was accepted: ticking it tells
+                // public servers this wallet's addresses, which deserves its own choice each time.
+                var useSha by remember { mutableStateOf(false) }
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { useSha = !useSha }) {
                     Text(if (useSha) "☑" else "☐", color = accent)
                     Spacer(Modifier.width(8.dp))

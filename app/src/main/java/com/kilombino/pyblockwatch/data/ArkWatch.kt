@@ -24,6 +24,11 @@ object ArkWatch {
         runCatching { Ark.balance() }.getOrNull() ?: return
         val movements = Ark.activity()
 
+        // Said once per new disagreement, not on every pass.
+        val mismatch = runCatching { com.kilombino.pyblockwatch.ark.ArkCrossCheck.check(ctx) }.getOrNull()
+        if (mismatch != null && prefs.getString("xcheck", null) != mismatch) notifier.arkChainMismatch(mismatch)
+        prefs.edit().putString("xcheck", mismatch).apply()
+
         // "seen2": since 0.15 the list also holds the deposit's transactions, so the old
         // baseline would announce every past deposit. A fresh key starts a fresh baseline.
         val seen = prefs.getString("seen2", null)?.let { JSONObject(it) }

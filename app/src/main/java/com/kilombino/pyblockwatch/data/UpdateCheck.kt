@@ -56,6 +56,8 @@ object UpdateCheck {
         val apk = (0 until (assets?.length() ?: 0)).map { assets!!.getJSONObject(it) }
             .firstOrNull { it.optString("name").endsWith(".apk") }?.optString("browser_download_url")
         val sha = Regex("Signed APK SHA-256:\\s*`([0-9a-f]{64})`").find(o.optString("body"))?.groupValues?.get(1)
-        Outcome.Newer(Release(tag.removePrefix("v"), o.getString("html_url"), apk, sha))
+        // Without the hash in its notes a release is only offered as a page to open, never
+        // downloaded and installed from inside the app.
+        Outcome.Newer(Release(tag.removePrefix("v"), o.getString("html_url"), if (sha != null) apk else null, sha))
     }.getOrDefault(Outcome.Unreachable)
 }

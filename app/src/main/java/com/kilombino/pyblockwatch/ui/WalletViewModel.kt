@@ -52,6 +52,12 @@ data class SendDraft(
     val extra: List<Pair<String, Long>> = emptyList(),
     /** The BIP-353 handle (user@domain) the first recipient was resolved from, if any. */
     val handle: String? = null,
+    /**
+     * A spamchain draft only: its pre-fork coins that are still unspent on BTC, the ones a
+     * rebroadcast of this spend there would move (empty: none, all already split; null:
+     * BTC could not be asked).
+     */
+    val replayableOnBtc: List<String>? = emptyList(),
     /** Set for a CPFP: the stuck transaction this child pulls along, and the pair's fee rate. */
     val cpfpParent: String? = null,
     /** Where the change goes (one of this wallet's addresses), shown in the review; null when there is none. */
@@ -967,20 +973,47 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
                 val key = com.kilombino.pyblockwatch.crypto.Wif.decode(wif)
                 val (to, _) = receiveAddress(nextReceiveIndex()) ?: error("No wallet to sweep into.")
                 val rate = feeRatePerVb.coerceIn(0.1, 1000.0)
-                fun scanKey(c: Chain, types: List<com.kilombino.pyblockwatch.crypto.ScriptType>): List<SweepCoin> {
+                // [checked]: each coin's amount and script read from the transaction that made it
+                // (fetched by txid, which the client checks), not taken from the server's list. A
+                // legacy input's signature does not commit to its amount, so a server lying about
+                // one could otherwise inflate the fee. Unconfirmed and immature mined coins, which
+                // the network would refuse, are left out too.
+                fun scanKey(c: Chain, types: List<com.kilombino.pyblockwatch.crypto.ScriptType>, checked: Boolean): List<SweepCoin> {
                     val endpoint = store.endpoint(c)
                     val client = com.kilombino.pyblockwatch.chain.ElectrumClient(endpoint, store.pinnedFingerprint(endpoint))
                     return try {
                         client.connect()
-                        types.flatMap { t ->
+                        val listed = types.flatMap { t ->
                             val addr = com.kilombino.pyblockwatch.crypto.Address.encode(key.pubkey, t)
                             client.listUnspent(com.kilombino.pyblockwatch.crypto.Address.scriptHashFor(key.pubkey, t))
                                 .map { SweepCoin(t, addr, it.txid, it.vout, it.value, it.height) }
                         }
+                        if (!checked) return listed
+                        val tip = client.blockHeight()
+                        val spv = c == Chain.BLAKE2B && !client.isOwnNode
+                        if (spv) requireNotNull(runCatching { com.kilombino.pyblockwatch.chain.HeaderChain.sync(client) }.getOrNull()) {
+                            "The server's block headers don't verify, so its coins can't be proven. Nothing was signed; try another server."
+                        }
+                        val txs = HashMap<String, com.kilombino.pyblockwatch.crypto.TxParse.Tx>()
+                        listed.filter { it.height > 0 }.filter { u ->
+                            val tx = txs.getOrPut(u.txid) { com.kilombino.pyblockwatch.crypto.TxParse.parse(client.transaction(u.txid)) }
+                            val out = tx.outputs.getOrNull(u.vout)
+                                ?: error("The server listed a coin that does not exist (${u.txid.take(8)}…:${u.vout}). Nothing was signed.")
+                            require(out.value == u.value &&
+                                out.scriptPubKey.contentEquals(com.kilombino.pyblockwatch.crypto.Address.scriptPubKey(key.pubkey, u.type))) {
+                                "The server's data about a coin (${u.txid.take(8)}…:${u.vout}) does not match the transaction itself. " +
+                                    "Nothing was signed; try another server."
+                            }
+                            if (spv) require(com.kilombino.pyblockwatch.chain.HeaderChain.proves(client, u.txid, u.height, Scanner.SPV_FLOOR_BITS) == true) {
+                                "A coin (${u.txid.take(8)}…:${u.vout}) could not be proven in its block. Nothing was signed; try another server."
+                            }
+                            val coinbase = tx.inputs.size == 1 && tx.inputs[0].txid.all { it == '0' } && tx.inputs[0].vout == -1
+                            !coinbase || tip - u.height + 1 >= Scanner.maturityFor(u.height)
+                        }
                     } finally { client.close() }
                 }
                 val coins = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    scanKey(chain, key.sweepableTypes)
+                    scanKey(chain, key.sweepableTypes, checked = true)
                 }
                 // The other chain is only asked about with consent: on the SHA-256 side that means
                 // public servers learn this key's addresses.
@@ -988,11 +1021,11 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
                     ?.takeIf { it != Chain.SHA256 || store.spamchainAccepted }
                 val otherSats = other?.let { c ->
                     kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                        runCatching { scanKey(c, key.sweepableTypes).sumOf { it.value } }.getOrNull()
+                        runCatching { scanKey(c, key.sweepableTypes, checked = false).sumOf { it.value } }.getOrNull()
                     }
                 }
                 require(coins.isNotEmpty()) {
-                    "This key has no coins on this chain." +
+                    "This key has no confirmed, spendable coins on this chain." +
                         (if ((otherSats ?: 0) > 0) " It has ${otherSats} sats on the other chain: switch chain and sweep again." else "")
                 }
                 val toScript = com.kilombino.pyblockwatch.crypto.Address.decodeToScriptPubKey(to)
@@ -1170,8 +1203,18 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
             val c = client(chain)
             try {
                 c.connect()
+                // On BTC each confirmed coin must also be in a block of the verified header chain
+                // (SPV): a coin a server made up has no such block.
+                val spv = chain == Chain.BLAKE2B && !c.isOwnNode
+                if (spv) requireNotNull(runCatching { com.kilombino.pyblockwatch.chain.HeaderChain.sync(c) }.getOrNull()) {
+                    "The server's block headers don't verify, so its coins can't be proven. Nothing was signed; try another server."
+                }
                 val txs = HashMap<String, com.kilombino.pyblockwatch.crypto.TxParse.Tx>()
                 for (u in coins) {
+                    if (spv && u.height > 0) require(com.kilombino.pyblockwatch.chain.HeaderChain.proves(
+                            c, u.txid, u.height, com.kilombino.pyblockwatch.data.Scanner.SPV_FLOOR_BITS) == true) {
+                        "A coin (${u.txid.take(8)}…:${u.vout}) could not be proven in its block. Nothing was signed; try another server."
+                    }
                     val tx = txs.getOrPut(u.txid) { com.kilombino.pyblockwatch.crypto.TxParse.parse(c.transaction(u.txid)) }
                     val out = tx.outputs.getOrNull(u.vout)
                         ?: error("The server listed a coin that does not exist (${u.txid.take(8)}…:${u.vout}). Nothing was signed.")
@@ -1464,8 +1507,13 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
                     fee = sum - totalOut // dust (or unpriced) change folded into the fee
                     change = 0
                 }
+                // A spamchain spend is signed the legacy way, so its pre-fork coins could be moved on
+                // BTC too by rebroadcasting it there, unless they have already moved on BTC.
+                val replayable = if (chain == Chain.SHA256 && chosen.any { it.height in 1 until Chain.BLAKE2B_FORK_HEIGHT })
+                    preForkOnBtc(chosen) else emptyList()
                 // The review shows what will really be paid: the resolved address, next to the handle.
                 val draft = SendDraft(effectiveTo, amountSats, fee, change, chosen, outputs, chain, silentRecipient,
+                    replayableOnBtc = replayable,
                     extra = extra.mapIndexed { i, (a, v) -> (resolvedExtra[i] ?: a) to v },
                     handle = if (toAddress.contains("@")) toAddress.trim() else null,
                     changeAddress = if (change > 0) runCatching { scriptToAddress(changeScript) }.getOrNull() else null)
@@ -1473,6 +1521,55 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
             }.onFailure { e ->
                 _state.update { it.copy(sendPhase = SendPhase.Failed(e.message ?: "Could not prepare the send.")) }
             }
+        }
+    }
+
+    /** Which of [coins] (spamchain ones) were made before the fork and are still unspent on BTC; null if BTC could not be asked. */
+    private suspend fun preForkOnBtc(coins: List<com.kilombino.pyblockwatch.data.Scanner.SpendableUtxo>): List<String>? {
+        val rows = _state.value.chains[Chain.BLAKE2B]?.rows?.filter { it.isUsed } ?: return null
+        val endpoint = store.endpoint(Chain.BLAKE2B)
+        val onBtc = runCatching {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                scanner.gatherUtxos(rows, endpoint, store.pinnedFingerprint(endpoint))
+            }
+        }.getOrNull() ?: return null
+        val unspent = onBtc.map { "${it.txid}:${it.vout}" }.toSet()
+        return coins.filter { it.height in 1 until Chain.BLAKE2B_FORK_HEIGHT }
+            .map { "${it.txid}:${it.vout}" }.filter { it in unspent }
+    }
+
+    /**
+     * Split pre-fork coins before spending them on the spamchain: drafts, on BTC, a send of
+     * exactly those coins to a new address of this wallet, signed with the unified sighash as
+     * every BTC spend is. Once it confirms they sit in a new output on BTC and the old one is
+     * spent there, so nothing later done with the old coins on the spamchain can be replayed
+     * onto BTC. No time rule is involved: it holds for good. The draft goes through the usual
+     * review and fingerprint.
+     */
+    fun splitOnBtc(outpoints: List<String>, feeRatePerVb: Double = 1.0) {
+        if (outpoints.isEmpty()) return
+        select(Chain.BLAKE2B)
+        _state.update { it.copy(sendPhase = SendPhase.Preparing) }
+        viewModelScope.launch {
+            runCatching {
+                val cs = _state.value.chains[Chain.BLAKE2B] ?: error("No BTC wallet.")
+                val endpoint = store.endpoint(Chain.BLAKE2B)
+                val coins = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    scanner.gatherUtxos(cs.rows.filter { it.isUsed }, endpoint, store.pinnedFingerprint(endpoint))
+                }.filter { "${it.txid}:${it.vout}" in outpoints }
+                require(coins.isNotEmpty()) { "Those coins have already moved on BTC: they are split, and the spamchain spend can't touch them." }
+                applyUtxos(Chain.BLAKE2B, coins)
+                val (to, _) = receiveAddress(nextReceiveIndex()) ?: error("No address to split into.")
+                val toScript = com.kilombino.pyblockwatch.crypto.Address.decodeToScriptPubKey(to)
+                val fee = estimateFee(coins.size, listOf(toScript), feeRatePerVb, taprootIn(coins))
+                val amount = coins.sumOf { it.value } - fee
+                require(amount > DUST_SATS) { "Those coins don't cover the fee of the split." }
+                Triple(to, amount, coins)
+            }.onSuccess { (to, amount, coins) ->
+                // Exactly these coins, never the loaded list a refresh may have replaced meanwhile.
+                prepareSend(to, amount, feeRatePerVb, selected = coins)
+            }
+             .onFailure { e -> _state.update { it.copy(sendPhase = SendPhase.Failed(e.message ?: "Could not prepare the split.")) } }
         }
     }
 
@@ -1553,6 +1650,27 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
      * must not be handed out again on the other.
      */
     fun nextReceiveIndex(): Int = nextUnused(0)
+
+    /**
+     * Receive indexes of the account new addresses come from that hold nothing and never did:
+     * the ones skipped below the last used address (handed out and never paid) and [ahead] past
+     * the next unused one, in order. A coinjoin seat's address is left out.
+     */
+    fun unusedReceiveIndexes(ahead: Int = 20): List<Int> {
+        val used = _state.value.chains.values.flatMap { it.rows }
+            .filter { it.chainIndex == 0 && it.type == newTag && it.isUsed }.map { it.index }.toSet()
+        val next = nextReceiveIndex()
+        val type = typeFor(newTag)
+        runCatching { com.kilombino.pyblockwatch.coinjoin.CoinjoinHub.load(getApplication()) }
+        val seats = com.kilombino.pyblockwatch.coinjoin.CoinjoinHub.states.value
+            .filter { it.terms.script == type }.mapNotNull { it.mixScript?.toList() }.toSet()
+        return (0 until next + ahead).filter { i ->
+            if (i in used) return@filter false
+            if (seats.isEmpty() || i >= next) return@filter true
+            val addr = receiveAddress(i)?.first ?: return@filter false
+            runCatching { com.kilombino.pyblockwatch.crypto.Address.decodeToScriptPubKey(addr).toList() !in seats }.getOrDefault(false)
+        }
+    }
 
     /**
      * Which account new addresses come from: [ScriptType.P2TR] for the hot wallet's Taproot one

@@ -109,6 +109,7 @@ class MainActivity : FragmentActivity() {
         enableEdgeToEdge()
         StreetMode.init(this)
         com.kilombino.pyblockwatch.chain.Tor.install(this)
+        Palette.load(this)
         setContent {
             PyBlockWatchTheme {
                 val vm: WalletViewModel = viewModel()
@@ -181,7 +182,7 @@ class MainActivity : FragmentActivity() {
                             title = { Text("Kilowallet ${r.version} is out") },
                             text = { Text("Update now: it downloads here, is checked against the published hash and this " +
                                 "app's certificate, and installs over this one keeping everything." +
-                                (if (r.apkUrl == null) "\n\nThis release has no APK attached: open its page instead." else "") +
+                                (if (r.apkUrl == null) "\n\nThis release can't be installed from here (no APK, or no published hash to check it against): open its page instead." else "") +
                                 (if (busy) "\n\nA coinjoin round of yours is under way: updating now leaves it (your coin " +
                                     "stays where it is), or choose NOT NOW and update once it is over." else ""),
                                 style = MaterialTheme.typography.bodySmall) },
@@ -1217,6 +1218,18 @@ internal fun SettingsPanel(
                 }
                 Switch(checked = StreetMode.byDefault, onCheckedChange = { StreetMode.setByDefault(activity, it) },
                     colors = switchColors(accent))
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Colour", style = MaterialTheme.typography.bodyMedium, color = TextMain)
+                    Explain("The app's accent: purple, or blue (with Lightning in gold).")
+                }
+                TextButton(onClick = { Palette.choose(activity, false); activity.recreate() }) {
+                    Text("PURPLE", color = if (!Palette.isBlue) Palette.PURPLE.accent else TextFaint, style = MaterialTheme.typography.bodySmall)
+                }
+                TextButton(onClick = { Palette.choose(activity, true); activity.recreate() }) {
+                    Text("BLUE", color = if (Palette.isBlue) Palette.BLUE.accent else TextFaint, style = MaterialTheme.typography.bodySmall)
+                }
             }
         }
         Spacer(Modifier.height(6.dp))

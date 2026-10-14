@@ -134,15 +134,9 @@ private fun ArkScreenBody(vm: WalletViewModel, accent: Color, pull: Int) {
         expiry = withContext(Dispatchers.IO) { Ark.blocksToNearestExpiry() }
         history = withContext(Dispatchers.IO) { runCatching { Ark.activity() }.getOrDefault(emptyList()) }
         fingerprint = withContext(Dispatchers.IO) { Ark.stateFingerprint() }
-        val arkTip = withContext(Dispatchers.IO) { Ark.tip() }
-        // Only a height checked this run: the one remembered from the last look (shown while the
-        // wallet checks again) can be blocks old, which is no disagreement.
-        val elTip = vm.state.value.chains[com.kilombino.pyblockwatch.chain.Chain.BLAKE2B]
-            ?.takeIf { !it.stale }?.height?.takeIf { it > 0 }
-        tipMismatch = if (arkTip != null && elTip != null && kotlin.math.abs(arkTip - elTip) > 3)
-            "The Ark engine's chain source (block $arkTip) and your BTC server (block $elTip) disagree. One of them " +
-                "is behind or not telling the whole story: wait before moving Ark funds, and check your node."
-        else null
+        // The engine's chain source against the BTC server and the verified headers: the tip,
+        // and every on-chain transaction the engine calls confirmed (ArkCrossCheck).
+        tipMismatch = withContext(Dispatchers.IO) { com.kilombino.pyblockwatch.ark.ArkCrossCheck.check(ctx) }
         // The same alerts as the background watcher, so a movement pops up while the app is open.
         withContext(Dispatchers.IO) {
             if (com.kilombino.pyblockwatch.data.Store(ctx).notificationsEnabled)

@@ -112,10 +112,9 @@ object AppUpdater {
 
     @Suppress("DEPRECATION")
     private fun verify(ctx: Context, f: File, r: UpdateCheck.Release) {
-        r.sha256?.let { expected ->
-            val got = sha256(f)
-            check(got == expected) { f.delete(); "The downloaded file is not the published one (SHA-256 differs). Nothing was installed." }
-        }
+        // No published hash, no install from inside the app (UpdateCheck offers the page then).
+        val expected = r.sha256 ?: run { f.delete(); error("This release does not publish its APK's SHA-256. Nothing was installed: update from its page.") }
+        check(sha256(f) == expected) { f.delete(); "The downloaded file is not the published one (SHA-256 differs). Nothing was installed." }
         val pm = ctx.packageManager
         val flag = if (Build.VERSION.SDK_INT >= 28) PackageManager.GET_SIGNING_CERTIFICATES else PackageManager.GET_SIGNATURES
         val theirs = certs(pm, pm.getPackageArchiveInfo(f.absolutePath, flag))

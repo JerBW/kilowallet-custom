@@ -609,12 +609,24 @@ fun SendSheet(vm: WalletViewModel, accent: Color, onClose: () -> Unit) {
                 // else), so if its coins existed before the fork the same bytes are also valid on
                 // BTC: anyone can rebroadcast them there.
                 if (d.chain == com.kilombino.pyblockwatch.chain.Chain.SHA256 &&
-                    d.inputs.any { it.height in 1 until com.kilombino.pyblockwatch.chain.Chain.BLAKE2B_FORK_HEIGHT })
-                    Text("⚠️ Some of these coins are from before the fork (block ${com.kilombino.pyblockwatch.chain.Chain.BLAKE2B_FORK_HEIGHT}). " +
-                        "This spend is then valid on BTC too: anyone can rebroadcast it there, moving the same coins on BTC " +
-                        "to the same addresses. Move those coins on the BTC tab first (that splits them), or only send to " +
-                        "an address you also control on BTC.",
-                        color = Warn, style = MaterialTheme.typography.bodySmall)
+                    d.inputs.any { it.height in 1 until com.kilombino.pyblockwatch.chain.Chain.BLAKE2B_FORK_HEIGHT }) {
+                    val atRisk = d.replayableOnBtc
+                    if (atRisk != null && atRisk.isEmpty()) {
+                        Text("Coins from before the fork, already split: they have moved on BTC, so this spend can't touch your BTC.",
+                            color = TextFaint, style = MaterialTheme.typography.bodySmall)
+                    } else {
+                        Text("⚠️ " + (atRisk?.let { "${it.size} of these coins are" } ?: "Some of these coins may be") +
+                            " from before the fork (block ${com.kilombino.pyblockwatch.chain.Chain.BLAKE2B_FORK_HEIGHT}) and still unmoved on BTC. " +
+                            "This spend is then valid on BTC too: anyone can rebroadcast it there, moving the same coins on BTC " +
+                            "to the same addresses. Split them first: a send to yourself on BTC, which can't be copied to the " +
+                            "spamchain. Once it confirms, come back and send here.",
+                            color = Warn, style = MaterialTheme.typography.bodySmall)
+                        if (!atRisk.isNullOrEmpty()) androidx.compose.material3.OutlinedButton(
+                            onClick = { vm.splitOnBtc(atRisk) }, modifier = Modifier.fillMaxWidth()) {
+                            Text("SPLIT THEM ON BTC FIRST", color = Warn)
+                        }
+                    }
+                }
                 RowLine("Fee", "${groupSats(d.fee)} sats", accent)
                 RowLine("Change", if (d.change > 0) "${groupSats(d.change)} sats" else "—", accent)
                 d.changeAddress?.let {
@@ -964,6 +976,8 @@ fun QrImage(text: String, sizeDp: Int) {
 fun ReceiveSheet(vm: WalletViewModel, accent: Color, onClose: () -> Unit) {
     val copier = rememberCopier()
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+    // Every unused address, the ones skipped below the last used one included: ◀ ▶ move among them.
+    val unused = remember { vm.unusedReceiveIndexes() }
     var index by remember { mutableStateOf(vm.nextReceiveIndex()) }
     val pair = remember(index) { vm.receiveAddress(index) }
     var sweeping by remember { mutableStateOf(false) }
@@ -998,7 +1012,9 @@ fun ReceiveSheet(vm: WalletViewModel, accent: Color, onClose: () -> Unit) {
                 Text(address, style = MaterialTheme.typography.bodyMedium,
                      fontFamily = FontFamily.Monospace, color = TextMain, modifier = Modifier.clickable { copier.copy(address) })
                 Spacer(Modifier.height(4.dp))
-                Text("unused · $path", style = MaterialTheme.typography.bodySmall, color = TextFaint)
+                val pos = unused.indexOf(index)
+                Text("unused · $path" + (if (pos >= 0) " · ${pos + 1} of ${unused.size}" else ""),
+                    style = MaterialTheme.typography.bodySmall, color = TextFaint)
             }
             Spacer(Modifier.height(10.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1007,15 +1023,25 @@ fun ReceiveSheet(vm: WalletViewModel, accent: Color, onClose: () -> Unit) {
                     colors = ButtonDefaults.buttonColors(containerColor = if (copier.copied) Good else accent, contentColor = Ink),
                     shape = RoundedCornerShape(12.dp), modifier = Modifier.weight(1f),
                 ) { Text(if (copier.copied) "COPIED ✓" else "COPY", style = MaterialTheme.typography.titleMedium) }
+            }
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                val prev = unused.lastOrNull { it < index }
+                val next = unused.firstOrNull { it > index } ?: (index + 1)
                 Button(
-                    onClick = { index += 1 },
+                    onClick = { prev?.let { index = it } }, enabled = prev != null,
                     colors = ButtonDefaults.buttonColors(containerColor = PanelSoft, contentColor = accent),
                     shape = RoundedCornerShape(12.dp), modifier = Modifier.weight(1f),
-                ) { Text("NEXT ADDRESS", style = MaterialTheme.typography.titleMedium) }
+                ) { Text("◀ PREVIOUS", style = MaterialTheme.typography.titleMedium) }
+                Button(
+                    onClick = { index = next },
+                    colors = ButtonDefaults.buttonColors(containerColor = PanelSoft, contentColor = accent),
+                    shape = RoundedCornerShape(12.dp), modifier = Modifier.weight(1f),
+                ) { Text("NEXT ▶", style = MaterialTheme.typography.titleMedium) }
             }
-            if (index > vm.nextReceiveIndex()) {
+            if (index != vm.nextReceiveIndex()) {
                 TextButton(onClick = { index = vm.nextReceiveIndex() }, modifier = Modifier.fillMaxWidth()) {
-                    Text("back to first unused", color = TextFaint, style = MaterialTheme.typography.bodySmall)
+                    Text("back to the next unused", color = TextFaint, style = MaterialTheme.typography.bodySmall)
                 }
             }
             TextButton(onClick = { sweeping = true }, modifier = Modifier.fillMaxWidth()) {

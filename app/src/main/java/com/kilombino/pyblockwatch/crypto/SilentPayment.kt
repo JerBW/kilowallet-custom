@@ -61,12 +61,12 @@ object SilentPayment {
         val inputHash = BigInteger(1, Hashes.taggedHash("BIP0352/Inputs", smallest + sumPubkey)).mod(N)
 
         // ecdh = input_hash · a · B_scan
-        val ecdh = Secp256k1.multiply(inputHash.multiply(a).mod(N), recipient.scan)
+        val ecdh = Secp256k1.multiplySecret(inputHash.multiply(a).mod(N), recipient.scan)
         val ecdhSer = Secp256k1.compress(ecdh)
 
         // t_k = hash(ecdh ‖ ser32(k)); the output key is B_spend + t_k·G.
         val tk = BigInteger(1, Hashes.taggedHash("BIP0352/SharedSecret", ecdhSer + ser32(k))).mod(N)
-        val outputPoint = Secp256k1.add(recipient.spend, Secp256k1.multiply(tk, Secp256k1.G))
+        val outputPoint = Secp256k1.add(recipient.spend, Secp256k1.publicPoint(tk))
         val xOnly = Secp256k1.xOnly(outputPoint)
         return byteArrayOf(0x51, 0x20) + xOnly // OP_1 <32-byte Taproot output>
     }

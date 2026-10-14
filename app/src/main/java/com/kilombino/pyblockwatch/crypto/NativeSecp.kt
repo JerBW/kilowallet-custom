@@ -42,6 +42,43 @@ object NativeSecp {
         } finally { k.fill(0) }
     }
 
+    /**
+     * Whether the library's ECDH and tweak agree with the Kotlin code, checked once with public
+     * numbers (7·(5·G), 5+7): a library that disagreed would derive wrong keys, so it is then
+     * left unused for these two.
+     */
+    private val newOpsOk: Boolean by lazy {
+        runCatching {
+            val p = Secp256k1.multiply(BigInteger.valueOf(5), Secp256k1.G)
+            val k = b32(BigInteger.valueOf(7))
+            val e = ArkNative.secpEcdh(k, byteArrayOf(4) + b32(p.x!!) + b32(p.y!!)) ?: return@runCatching false
+            val want = Secp256k1.multiply(BigInteger.valueOf(35), Secp256k1.G)
+            val t = ArkNative.secpTweakAdd(b32(BigInteger.valueOf(5)), k) ?: return@runCatching false
+            BigInteger(1, e.copyOfRange(1, 33)) == want.x && BigInteger(1, e.copyOfRange(33, 65)) == want.y &&
+                BigInteger(1, t) == BigInteger.valueOf(12)
+        }.getOrElse { false }
+    }
+
+    /** secret · [point] in constant time, or null without the library (the caller does it in Kotlin). */
+    fun ecdh(secret: BigInteger, point: Secp256k1.Point): Secp256k1.Point? {
+        if (!available || point.isInfinity || !newOpsOk) return null
+        val k = b32(secret)
+        try {
+            val p = native { ArkNative.secpEcdh(k, byteArrayOf(4) + b32(point.x!!) + b32(point.y!!)) ?: error("invalid key or point") } ?: return null
+            return Secp256k1.Point(BigInteger(1, p.copyOfRange(1, 33)), BigInteger(1, p.copyOfRange(33, 65)))
+        } finally { k.fill(0) }
+    }
+
+    /** (secret + tweak) mod n in constant time, or null without the library. */
+    fun tweakAdd(secret: BigInteger, tweak: BigInteger): BigInteger? {
+        if (!available || !newOpsOk) return null
+        val k = b32(secret); val t = b32(tweak)
+        try {
+            val r = native { ArkNative.secpTweakAdd(k, t) ?: error("invalid key or tweak") } ?: return null
+            return BigInteger(1, r).also { r.fill(0) }
+        } finally { k.fill(0) }
+    }
+
     fun schnorr(secret: BigInteger, msg: ByteArray, aux: ByteArray): ByteArray? {
         if (!available) return null
         val k = b32(secret)

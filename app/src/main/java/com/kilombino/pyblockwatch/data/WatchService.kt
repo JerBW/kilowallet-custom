@@ -41,7 +41,13 @@ class WatchService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         com.kilombino.pyblockwatch.chain.Tor.install(this) // a .onion node is reachable from the background too
-        startForeground(ONGOING_ID, ongoingNotification())
+        // specialUse from Android 14: dataSync is cut after ~6 hours a day on 15, and the
+        // notifications stopped with it.
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
+            startForeground(ONGOING_ID, ongoingNotification(), android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+        else if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q)
+            startForeground(ONGOING_ID, ongoingNotification(), android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+        else startForeground(ONGOING_ID, ongoingNotification())
         if (job?.isActive != true) job = scope.launch { loop() }
         return START_STICKY
     }

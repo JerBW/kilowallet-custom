@@ -20,7 +20,10 @@ class CoinjoinService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         CoinjoinHub.ensureChannel(this)
         val n = ongoing(this)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
+        // specialUse from Android 14: dataSync is cut after ~6 hours a day on 15, mid-round.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
+            startForeground(ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+        else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
             startForeground(ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
         else startForeground(ID, n)
         // The cards first: a round that ended while the app was away still gets its last one.

@@ -1164,7 +1164,7 @@ private fun RoundCard(
 private fun CoinjoinTabs(tab: Int, inProgress: Int, accent: Color, onTab: (Int) -> Unit) {
     Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(PanelBg).padding(4.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        listOf("JOIN", "IN PROGRESS", "HISTORY").forEachIndexed { i, label ->
+        listOf("POOLS", "IN PROGRESS", "HISTORY").forEachIndexed { i, label ->
             val on = i == tab
             Row(Modifier.weight(1f).clip(RoundedCornerShape(10.dp)).background(if (on) accent else Color.Transparent)
                 .clickable { onTab(i) }.padding(vertical = 10.dp),

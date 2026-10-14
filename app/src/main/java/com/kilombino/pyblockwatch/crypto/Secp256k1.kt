@@ -3,25 +3,19 @@ package com.kilombino.pyblockwatch.crypto
 import java.math.BigInteger
 
 /**
- * secp256k1 curve arithmetic, in-tree and dependency-free.
+ * secp256k1 curve arithmetic, in Kotlin.
  *
- * WHY THIS EXISTS INSTEAD OF A LIBRARY
- * ------------------------------------
- * A watch-only wallet only ever needs PUBLIC key arithmetic: BIP-32 CKDpub, which
- * is `parse256(IL)·G + Kpar`. There is no signing here, no private key, and no
- * nonce generation — so the classic ECDSA footguns (biased/reused k, side-channel
- * leakage of a secret scalar) simply do not apply to this code. Every scalar we
- * multiply is public data derived from a public xpub.
+ * It began as public-key arithmetic for a watch-only wallet (BIP-32 CKDpub). The app has long
+ * signed and derived private keys as well, and this BigInteger code does not run in constant
+ * time: [multiply] branches on the scalar's bits. So every operation on a SECRET goes through
+ * libsecp256k1 (inside the Ark engine library, [NativeSecp]) whenever the app has it:
+ * [publicPoint] (k·G), [multiplySecret] (ECDH: NIP-44, BIP-352, BOLT 8), [addSecret] (BIP-32
+ * child keys, tweaks), and ECDSA and Schnorr signing. This code remains for verification and
+ * public math, for unit tests, and as the fallback on a CPU the library is not built for
+ * (it ships for arm64 only); there the same bytes come out, slower and not constant-time.
  *
- * That is what makes it defensible to implement the curve in-tree rather than
- * pull in a prebuilt `.so`: the whole cryptographic path stays auditable Kotlin
- * that anyone can read and rebuild, with nothing binary to trust. A bug here
- * yields a WRONG ADDRESS (visible, harmless, caught by the BIP-32 test vectors in
- * `Bip32Test`), not a stolen key.
- *
- * Affine coordinates with an explicit modular inverse per operation. Slower than
- * Jacobian, far easier to read and verify. A gap-limit scan is ~40 derivations,
- * a few milliseconds total — performance is irrelevant at this scale, clarity is not.
+ * Affine coordinates with an explicit modular inverse per operation: slower than Jacobian,
+ * far easier to read and verify, and the tests pin it against BIP-32/340/352 vectors.
  */
 object Secp256k1 {
     // BigInteger.TWO only exists from Android 13 (API 33): on older phones it crashed the app.
@@ -89,6 +83,12 @@ object Secp256k1 {
      * libsecp256k1 when the app has it, which is far faster than the BigInteger ladder.
      */
     fun multiplyG(k: BigInteger): Point = NativeSecp.pubkey(k) ?: multiply(k, G)
+
+    /** k·[point] for a SECRET k (ECDH): through libsecp256k1 when present (constant time), else [multiply]. */
+    fun multiplySecret(k: BigInteger, point: Point): Point = NativeSecp.ecdh(k, point) ?: multiply(k, point)
+
+    /** (a + b) mod n where either is SECRET (a child key, a tweaked key): libsecp256k1 when present. */
+    fun addSecret(a: BigInteger, b: BigInteger): BigInteger = NativeSecp.tweakAdd(a, b) ?: a.add(b).mod(N)
 
     fun multiply(k: BigInteger, point: Point): Point {
         var scalar = k.mod(N)

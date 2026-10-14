@@ -171,10 +171,10 @@ class Scanner(
             // Confirmations from the tip: height <= 0 is still in the mempool (0 conf).
             val amounts = netAmounts(client, txHeights.keys, rows.map { it.scriptHash }.toSet())
             val t2 = System.currentTimeMillis()
+            val proof = prover(client, height)
             val txs = txHeights.map { (id, h) ->
                 val a = amounts[id]
-                TxConf(id, if (h <= 0) 0 else height - h + 1, pending = h <= 0, amount = a,
-                    spv = if (h > 0 && a != null && a > 0 && height - h < SPV_WINDOW) spvCheck(client, id, h) else null)
+                TxConf(id, if (h <= 0) 0 else height - h + 1, pending = h <= 0, amount = a, spv = proof(id, h, a))
             }.sortedWith(compareBy({ !it.pending }, { it.confirmations }))
             android.util.Log.i("Kilowallet", "scan timing: connect+walk ${t1 - t0} ms, amounts ${t2 - t1} ms, spv ${System.currentTimeMillis() - t2} ms")
             saveDisk()
@@ -235,10 +235,10 @@ class Scanner(
                 r.copy(confirmed = bal.confirmed, unconfirmed = bal.unconfirmed, txCount = hist.size)
             }
             val amounts = netAmounts(client, txHeights.keys, rows.map { it.scriptHash }.toSet())
+            val proof = prover(client, tip)
             val txs = txHeights.map { (id, h) ->
                 val a = amounts[id]
-                TxConf(id, if (h <= 0) 0 else tip - h + 1, pending = h <= 0, amount = a,
-                    spv = if (h > 0 && a != null && a > 0 && tip - h < SPV_WINDOW) spvCheck(client, id, h) else null)
+                TxConf(id, if (h <= 0) 0 else tip - h + 1, pending = h <= 0, amount = a, spv = proof(id, h, a))
             }.sortedWith(compareBy({ !it.pending }, { it.confirmations }))
             saveDisk()
             Triple(updated, txs, tip)
@@ -367,6 +367,29 @@ class Scanner(
     }
 
     /**
+     * How each transaction of a look is proven (true, false, or null for unknown / unconfirmed).
+     *
+     * On the BTC chain (164-byte headers) the verified header chain is brought up to the
+     * server's tip first, and every confirmed transaction, received or sent, is proven by its
+     * merkle branch against it. A server whose headers do not verify has every confirmed
+     * transaction marked unproven. On the spamchain, recent incoming payments are proven
+     * against the header the server gives, as before.
+     */
+    private fun prover(client: ElectrumClient, tip: Int): (String, Int, Long?) -> Boolean? {
+        if (client.isOwnNode) return { _, h, _ -> if (h > 0) true else null } // your node validated its blocks
+        val blake = runCatching { client.tipHeaderHex().length == 328 }.getOrDefault(false)
+        if (!blake) return { id, h, a -> if (h > 0 && a != null && a > 0 && tip - h < SPV_WINDOW) spvCheck(client, id, h) else null }
+        val verified = runCatching { com.kilombino.pyblockwatch.chain.HeaderChain.sync(client) }.getOrNull()
+        return { id, h, _ ->
+            when {
+                h <= 0 -> null
+                verified == null -> false
+                else -> runCatching { com.kilombino.pyblockwatch.chain.HeaderChain.proves(client, id, h, SPV_FLOOR_BITS) }.getOrNull()
+            }
+        }
+    }
+
+    /**
      * SPV for one incoming payment: the server's merkle branch must lead from [txid] to the
      * merkle root of block [height]'s header, and that header must carry real proof of work at
      * no less than [SPV_FLOOR_BITS]. A lying server would have to mine a block to fake one.
@@ -427,6 +450,7 @@ class Scanner(
             if (disk != null) return
             dir.mkdirs(); java.io.File(dir, "tx").mkdirs()
             disk = dir
+            com.kilombino.pyblockwatch.chain.HeaderChain.useDir(dir)
             runCatching {
                 val o = org.json.JSONObject(java.io.File(dir, "derived.json").readText())
                 for (k in o.keys()) { val a = o.getJSONArray(k); derivedCache[k] = a.getString(0) to a.getString(1) }

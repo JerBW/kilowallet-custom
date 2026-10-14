@@ -124,6 +124,9 @@ class Notifier(private val context: Context, private val titlePrefix: String = "
     fun arkBoarded(amount: Long, key: String) =
         post(arkId("board", key), "Ark: funds moved in", "+${sats(amount)} sats are now spendable in Ark", OpenTab.ARK)
 
+    /** The Ark engine's chain source and the BTC server (verified) disagree. */
+    fun arkChainMismatch(text: String) = post(arkId("xcheck", text.take(40)), "Ark: chain sources disagree", text, OpenTab.ARK)
+
     fun arkWithdrawn(amount: Long, key: String) =
         post(arkId("out", key), "Ark: withdrawal done", "${sats(kotlin.math.abs(amount))} sats left Ark on-chain", OpenTab.ARK)
 

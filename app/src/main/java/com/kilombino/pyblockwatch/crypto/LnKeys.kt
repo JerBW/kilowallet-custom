@@ -20,7 +20,7 @@ object LnKeys {
 
     /** LND's ECDH: SHA-256 of the compressed shared point. */
     fun ecdh(priv: BigInteger, pub: ByteArray): ByteArray =
-        Hashes.sha256(Secp256k1.compress(Secp256k1.multiply(priv, point(pub))))
+        Hashes.sha256(Secp256k1.compress(Secp256k1.multiplySecret(priv, point(pub))))
 
     /** Per-commitment secret for [state] from a shachain root (index 2^48 − 1 − state). */
     fun commitmentSecret(root: ByteArray, state: Long): ByteArray {
@@ -45,7 +45,7 @@ object LnKeys {
         Secp256k1.compress(Secp256k1.add(point(base), Secp256k1.multiply(tweak(cp, base), Secp256k1.G)))
 
     fun tweakPriv(basePriv: BigInteger, basePub: ByteArray, cp: ByteArray): BigInteger =
-        basePriv.add(tweak(cp, basePub)).mod(N)
+        Secp256k1.addSecret(basePriv, tweak(cp, basePub))
 
     /** revBase·SHA256(revBase ‖ cp) + cp·SHA256(cp ‖ revBase) */
     fun revocationPub(revBase: ByteArray, cp: ByteArray): ByteArray {

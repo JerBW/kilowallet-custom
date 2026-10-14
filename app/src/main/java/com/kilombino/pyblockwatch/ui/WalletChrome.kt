@@ -37,8 +37,8 @@ import com.kilombino.pyblockwatch.chain.Chain
 /**
  * HOT WALLET | WATCH-ONLY, top left: two different wallets on one phone. The hot one is the
  * seed's; the watch-only one is a separate xpub, watched with its own notifications (one at
- * most). Going to hot asks for the fingerprint, or leads to create/restore when there is no
- * seed; going to watch-only the first time asks for the xpub.
+ * most). Going either way asks for the fingerprint; to hot with no seed it leads to
+ * create/restore instead, and to watch-only the first time it asks for the xpub.
  */
 @Composable
 fun WalletModeSwitch(state: UiState, vm: WalletViewModel, accent: Color, modifier: Modifier = Modifier) {
@@ -62,7 +62,11 @@ fun WalletModeSwitch(state: UiState, vm: WalletViewModel, accent: Color, modifie
             }
         }
         seg("WATCH-ONLY", !state.isHot) {
-            if (state.isHot) { if (vm.hasWatchWallet()) vm.viewAsWatchOnly() else setupWatch = true }
+            // The watched wallet's balances and addresses are as private as the hot one's: the
+            // fingerprint first, as going back to hot asks.
+            if (state.isHot) Biometric.confirm(activity, "Open the watch-only wallet",
+                "Unlock to see the watched wallet", onSuccess = { if (vm.hasWatchWallet()) vm.viewAsWatchOnly() else setupWatch = true },
+                onError = {})
         }
     }
 }

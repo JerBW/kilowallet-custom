@@ -23,7 +23,7 @@ object Nip44 {
 
     /** Shared secret between our [secret] and their x-only [pubX], as HKDF-extract. */
     fun conversationKey(secret: BigInteger, pubX: ByteArray): ByteArray {
-        val shared = Secp256k1.multiply(secret, Secp256k1.liftX(BigInteger(1, pubX)))
+        val shared = Secp256k1.multiplySecret(secret, Secp256k1.liftX(BigInteger(1, pubX)))
         return Hashes.hmacSha256(SALT, b32(shared.x!!))
     }
 
