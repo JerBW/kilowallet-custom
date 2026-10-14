@@ -607,7 +607,8 @@ private fun PayLn(accent: Color, scanned: String?, channels: List<Lnd.Channel>, 
             colors = ButtonDefaults.buttonColors(containerColor = accent), onClick = {
                 scope.launch {
                     runCatching { withContext(Dispatchers.IO) { Lnd.decode(text.removePrefix("lightning:")) } }
-                        .onSuccess { req = it }.onFailure { msg = (it.message ?: "not a valid invoice") to false }
+                        .onSuccess { if (it.blake2b) req = it else msg = Lnd.SHA256_INVOICE to false }
+                        .onFailure { msg = (it.message ?: "not a valid invoice") to false }
                 }
             }) { Text("READ INVOICE") }
         msg?.let { (t, ok) -> Text(t, color = if (ok) Good else Bad, style = MaterialTheme.typography.bodySmall) }
@@ -645,7 +646,7 @@ private fun PayLn(accent: Color, scanned: String?, channels: List<Lnd.Channel>, 
                     scope.launch {
                         runCatching { withContext(Dispatchers.IO) { Lnd.pay(text.removePrefix("lightning:"), feeLimit, outgoingChanId = via) } }
                             .onSuccess { paidSats = r.sats; msg = null; text = ""; Lightning.refresh() }
-                            .onFailure { msg = ("Not paid: " + (it.message ?: "failed")) to false }
+                            .onFailure { msg = Lnd.payError(it) to false }
                         busy = false; req = null
                     }
                 }) { Text(if (busy) "PAYING…" else "PAY", color = accent) }
