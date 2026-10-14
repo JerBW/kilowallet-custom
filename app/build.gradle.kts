@@ -26,7 +26,7 @@ android {
         minSdk = 26
         targetSdk = 35
         versionCode = 136
-        versionName = "1.0.6-beta1"
+        versionName = "1.0.6"
         // One native library of ours: the Ark engine, arm64-v8a only, rebuilt from a pinned
         // commit and checked against ark-engine/ENGINE before every release build. On other
         // ABIs the wallet runs without Ark. See README-REPRODUCIBLE.md §1.
