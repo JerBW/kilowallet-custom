@@ -8,6 +8,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardOptions
@@ -454,7 +456,18 @@ private fun OpenSheet(accent: Color, onchain: Long, onTx: (String) -> Unit, onDo
             Spacer(Modifier.width(12.dp))
             androidx.compose.material3.RadioButton(selected = custom, onClick = { custom = true }); Text("Another node", style = MaterialTheme.typography.bodySmall, color = TextMain)
         }
-        if (custom) OutlinedTextField(node, { node = it.trim() }, label = { Text("pubkey@host:port") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        if (custom) {
+            // Nodex lists this chain's Lightning nodes, with their channels and how to reach them.
+            val uri = androidx.compose.ui.platform.LocalUriHandler.current
+            Row(Modifier.clickable { runCatching { uri.openUri("https://nodex.kilombino.com") } }.padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(com.kilombino.pyblockwatch.R.drawable.nodex_logo),
+                    contentDescription = "Nodex", modifier = Modifier.size(28.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(6.dp)))
+                Spacer(Modifier.width(8.dp))
+                Text("Find a node on Nodex ↗", style = MaterialTheme.typography.bodySmall, color = accent)
+            }
+            OutlinedTextField(node, { node = it.trim() }, label = { Text("pubkey@host:port") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        }
         if (coins.isNotEmpty()) {
             Text("Coins to use (none ticked: the node chooses). Every ticked coin is spent: with an amount, the channel gets it and the rest comes back to the node as one coin (they consolidate); with the amount blank, all of them go into the channel.",
                 style = MaterialTheme.typography.bodySmall, color = TextSoft)
@@ -584,6 +597,8 @@ private fun PayLn(accent: Color, scanned: String?, channels: List<Lnd.Channel>, 
     var text by remember { mutableStateOf("") }
     LaunchedEffect(scanned) { if (scanned != null) text = scanned }
     var req by remember { mutableStateOf<Lnd.PayReq?>(null) }
+    // A SHA-256 invoice the bridge offered to pay, with its price, until accepted or cancelled.
+    var viaBridge by remember { mutableStateOf<Pair<Lnd.PayReq, com.kilombino.pyblockwatch.ln.Bridge.Estimate>?>(null) }
     var busy by remember { mutableStateOf(false) }
     var msg by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
     var paidSats by remember { mutableStateOf<Long?>(null) }
@@ -606,12 +621,28 @@ private fun PayLn(accent: Color, scanned: String?, channels: List<Lnd.Channel>, 
         Button(enabled = text.length > 20 && !busy, modifier = Modifier.fillMaxWidth(),
             colors = ButtonDefaults.buttonColors(containerColor = accent), onClick = {
                 scope.launch {
-                    runCatching { withContext(Dispatchers.IO) { Lnd.decode(text.removePrefix("lightning:")) } }
-                        .onSuccess { if (it.blake2b) req = it else msg = Lnd.SHA256_INVOICE to false }
+                    val inv = text.removePrefix("lightning:")
+                    runCatching { withContext(Dispatchers.IO) { Lnd.decode(inv) } }
+                        .onSuccess { r ->
+                            if (r.blake2b) { req = r; return@onSuccess }
+                            // A SHA-256 invoice: offer Kilombino's bridge, with its price first.
+                            if (r.sats <= 0L) { msg = com.kilombino.pyblockwatch.ln.Bridge.text("no_amount") to false; return@onSuccess }
+                            busy = true; msg = "Asking Kilombino's bridge for the price…" to true
+                            runCatching { withContext(Dispatchers.IO) { com.kilombino.pyblockwatch.ln.Bridge.check(ctx, inv) } }
+                                .onSuccess { e -> msg = null; viaBridge = r to e }
+                                .onFailure { e -> msg = (e.message ?: "the bridge did not answer") to false }
+                            busy = false
+                        }
                         .onFailure { msg = (it.message ?: "not a valid invoice") to false }
                 }
-            }) { Text("READ INVOICE") }
+            }) { Text(if (busy && req == null && viaBridge == null) "READING…" else "READ INVOICE") }
         msg?.let { (t, ok) -> Text(t, color = if (ok) Good else Bad, style = MaterialTheme.typography.bodySmall) }
+    }
+    viaBridge?.let { (sha, est) ->
+        BridgePay(accent, text.removePrefix("lightning:"), sha, est,
+            onPaid = { s -> viaBridge = null; paidSats = s; text = ""; scope.launch { Lightning.refresh() } },
+            onFailed = { m -> viaBridge = null; msg = m to false },
+            onCancel = { viaBridge = null })
     }
     req?.let { r ->
         val feeLimit = Lightning.feeLimit(ctx, r.sats)
@@ -653,6 +684,82 @@ private fun PayLn(accent: Color, scanned: String?, channels: List<Lnd.Channel>, 
             },
             dismissButton = { TextButton(enabled = !busy, onClick = { req = null }) { Text("CANCEL") } })
     }
+}
+
+/**
+ * Pays a SHA-256 invoice with BTC through Kilombino's bridge, once the user has accepted its
+ * price. The hold invoice the bridge hands back is checked on this phone's own node before a
+ * sat leaves (same payment hash, Kilombino's node, option_blake2b, no more than accepted,
+ * time left), and the preimage that comes back is checked against the invoice's hash.
+ */
+@Composable
+private fun BridgePay(accent: Color, invoice: String, sha: Lnd.PayReq, est: com.kilombino.pyblockwatch.ln.Bridge.Estimate,
+                      onPaid: (Long) -> Unit, onFailed: (String) -> Unit, onCancel: () -> Unit) {
+    val B = com.kilombino.pyblockwatch.ln.Bridge
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var busy by remember { mutableStateOf(false) }
+    var step by remember { mutableStateOf("") }
+    // The bridge asks to wait before re-quoting this invoice (see its web page): count it down.
+    var wait by remember { mutableStateOf(est.waitSeconds) }
+    LaunchedEffect(Unit) { while (wait > 0) { kotlinx.coroutines.delay(1_000); wait-- } }
+    val feeLimit = Lightning.feeLimit(ctx, est.maxPaySat)
+    AlertDialog(onDismissRequest = { if (!busy) onCancel() },
+        title = { Text("Pay this SHA-256 invoice with BTC?") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("This invoice is for Lightning on the SHA-256 chain. Kilombino's bridge can pay it for you: " +
+                    "you pay in BTC, and it pays the invoice.", style = MaterialTheme.typography.bodySmall)
+                if (sha.description.isNotBlank()) Text("“${sha.description}”", style = MaterialTheme.typography.bodySmall, color = TextSoft)
+                Text("Invoice: ${groupSats(sha.sats)} sats SHA-256", style = MaterialTheme.typography.bodyMedium, color = TextMain)
+                Text("You pay about ${groupSats(est.paySat)} sats BTC", style = MaterialTheme.typography.titleMedium, color = accent)
+                Text("Bridge fee ${"%.2f".format(est.spread * 100)} %, at the market price (Neoxa, checked against a second market). " +
+                    "If the price moves before paying, at most ${groupSats(est.maxPaySat)} sats; above that nothing is paid. " +
+                    "Plus the routing fee to the bridge, at most ${groupSats(feeLimit)} sats.",
+                    style = MaterialTheme.typography.bodySmall, color = TextSoft)
+                Text("Nobody holds your money: your payment is held and the bridge can only collect it by paying this invoice. " +
+                    "If it can't, your BTC comes back by itself." +
+                    (if (com.kilombino.pyblockwatch.chain.Tor.available) " The bridge is asked over Tor." else ""),
+                    style = MaterialTheme.typography.bodySmall, color = TextSoft)
+                if (wait > 0) Text(B.text("wait", org.json.JSONObject().put("wait_s", wait)), color = Bad, style = MaterialTheme.typography.bodySmall)
+                if (step.isNotBlank()) Text(step, style = MaterialTheme.typography.bodySmall, color = accent)
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = !busy && wait == 0, onClick = {
+                busy = true
+                scope.launch {
+                    val result = runCatching {
+                        withContext(Dispatchers.IO) {
+                            step = "Getting the final price…"
+                            val q = B.quote(ctx, invoice)
+                            // The payer API's checks, on this phone's own node, before a sat leaves.
+                            val hold = Lnd.decode(q.holdInvoice)
+                            B.mismatch(hold, hold.msat, sha, q, est.maxPaySat, System.currentTimeMillis() / 1000)
+                                ?.let { throw IllegalStateException("Not paid: $it.") }
+                            step = "Paying ${groupSats(B.ceilSat(hold.msat))} sats BTC… the bridge pays the invoice and then collects."
+                            val preimage = try {
+                                Lnd.pay(q.holdInvoice, Lightning.feeLimit(ctx, B.ceilSat(hold.msat)), timeoutSeconds = 60)
+                            } catch (e: Exception) {
+                                // What the bridge says about it, when it has something to say.
+                                throw IllegalStateException(when (B.state(ctx, q.hash)) {
+                                    "aborted" -> "Not paid: the price moved against the bridge before it paid, so it gave your BTC back. Nothing was charged."
+                                    "failed" -> "Not paid: the bridge could not pay the SHA-256 invoice (no route there, or the invoice was refused). Your BTC came back."
+                                    "expired" -> "Not paid: the price expired before your payment reached the bridge. Nothing was charged."
+                                    else -> Lnd.payError(e) + " Nothing was charged."
+                                })
+                            }
+                            if (!B.proves(preimage, sha.hash)) throw IllegalStateException(
+                                "Paid, but the proof does not match the invoice: tell Kilombino, with the payment hash ${sha.hash}.")
+                            B.ceilSat(hold.msat)
+                        }
+                    }
+                    busy = false
+                    result.onSuccess { onPaid(it) }.onFailure { onFailed(it.message ?: "Not paid.") }
+                }
+            }) { Text(if (busy) "PAYING…" else "PAY ${groupSats(est.paySat)} SATS", color = accent) }
+        },
+        dismissButton = { TextButton(enabled = !busy, onClick = onCancel) { Text("CANCEL") } })
 }
 
 /** Saves LND's channel backup on its own, for a restore without the full backup file. */

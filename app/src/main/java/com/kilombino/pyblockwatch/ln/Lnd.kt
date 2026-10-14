@@ -257,14 +257,17 @@ object Lnd {
 
     data class PayReq(val destination: String, val hash: String, val sats: Long, val description: String, val expiry: Long, val timestamp: Long,
                       /** Sets option_blake2b (feature 512 or 513): an invoice of this chain, not of the SHA-256 one. */
-                      val blake2b: Boolean = true)
+                      val blake2b: Boolean = true,
+                      /** The exact amount, in millisatoshis (num_msat). */
+                      val msat: Long = sats * 1000)
 
     suspend fun decode(invoice: String): PayReq {
         val m = call { Lndmobile.decodePayReq(Pb().string(1, invoice.trim()).build(), it) }
         // features (13) is a map<uint32, Feature>: each entry carries its bit as key (1).
         val bits = m.msgs(13).map { it.long(1) }.toSet()
+        // num_msat (12): the bridge's hold invoices are not whole sats.
         return PayReq(m.string(1), m.string(2), m.long(3), m.string(6), m.long(5), m.long(4),
-            blake2b = 512L in bits || 513L in bits)
+            blake2b = 512L in bits || 513L in bits, msat = m.long(12))
     }
 
     /** What a payment error means to someone paying, when the node's own words would not say. */
@@ -276,8 +279,8 @@ object Lnd {
         }
     }
 
-    const val SHA256_INVOICE = "This invoice is for Lightning on the SHA-256 chain. Kilowallet pays XBT (BLAKE2b) " +
-        "Lightning invoices only: ask the recipient for an XBT invoice. Nothing was sent."
+    const val SHA256_INVOICE = "This invoice is for Lightning on the SHA-256 chain, which this node does not pay " +
+        "directly. Paste it in PAY and read it: Kilombino's bridge can pay it with BTC. Nothing was sent."
 
     // ---------------------------------------------------------------- actions
 
