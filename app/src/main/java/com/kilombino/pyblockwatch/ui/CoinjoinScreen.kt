@@ -841,7 +841,7 @@ private fun ExactCoinPanel(vm: WalletViewModel, accent: Color, exact: Long, tag:
                 "confirmation before it can join; then it goes in with no change.")
             Spacer(Modifier.height(6.dp))
             SectionLabel("Coin control · pay it with", accent)
-            Text("Tick one or more coins, native SegWit and Taproot alike; with none ticked the biggest go first. " +
+            Text("Tick one or more coins, native SegWit and Taproot alike; with none ticked the biggest never-mixed ones go first. " +
                 "The exact coin itself is always ${if (tag == ScriptType.P2TR) "Taproot" else "native SegWit"}, the pool's type.",
                 color = TextFaint, style = MaterialTheme.typography.bodySmall)
             sourcesError?.let { e ->
@@ -857,12 +857,21 @@ private fun ExactCoinPanel(vm: WalletViewModel, accent: Color, exact: Long, tag:
                     }.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text(if (sel) "☑" else "☐", color = if (sel) accent else TextFaint, modifier = Modifier.width(26.dp))
                         Column(Modifier.weight(1f)) {
-                            Text("${groupSats(u.value)} sats · ${vm.coinKind(u)}", color = if (sel) accent else TextMain,
-                                style = MaterialTheme.typography.bodySmall)
+                            Row {
+                                Text("${groupSats(u.value)} sats · ${vm.coinKind(u)}", color = if (sel) accent else TextMain,
+                                    style = MaterialTheme.typography.bodySmall)
+                                if (vm.isMixedCoin(u)) Text(" · mixed", color = Warn, style = MaterialTheme.typography.bodySmall)
+                            }
                             Text(vm.coinAddress(u)?.let { shortAddress(it) } ?: "", color = TextFaint, style = MaterialTheme.typography.bodySmall)
                         }
                     }
                 }
+                // A mixed coin may pay for it, but not without saying what that costs.
+                val mixedPicked = picked.count { vm.isMixedCoin(it) }
+                if (mixedPicked > 0) Text(
+                    if (picked.size > mixedPicked) "A mixed coin spent together with other coins ties them back together: the mix is undone for both."
+                    else "The change of this payment comes back linked to the mixed coin. Better to use coins that were never mixed.",
+                    color = Warn, style = MaterialTheme.typography.bodySmall)
                 if (picked.isNotEmpty()) Text("ticked: ${picked.size} coin(s), ${groupSats(picked.sumOf { it.value })} sats" +
                     if (picked.sumOf { it.value } < exact) " — not enough for ${groupSats(exact)} plus the fee" else "",
                     color = if (picked.sumOf { it.value } < exact) Warn else accent, style = MaterialTheme.typography.bodySmall)

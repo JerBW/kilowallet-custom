@@ -1939,8 +1939,18 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
      * (reserved on both chains). It goes through the normal send review: the draft is left
      * in sendPhase for the screen to show and confirm with the fingerprint.
      */
-    /** Confirmed coins of either kind that never came out of a coinjoin: what an exact coin can be paid with. */
-    suspend fun exactCoinSources(): List<Scanner.SpendableUtxo> {
+    /** A coin that came out of a coinjoin round of this wallet. */
+    fun isMixedCoin(u: Scanner.SpendableUtxo): Boolean {
+        val mixed = com.kilombino.pyblockwatch.coinjoin.CoinjoinHub.states.value.map { it.mixScript.toList() }.toSet()
+        return coinScript(u).toList() in mixed
+    }
+
+    /**
+     * Confirmed coins of either kind, not promised to a round: what an exact coin can be paid
+     * with. Mixed ones are listed too ([isMixedCoin]); the screen warns before they are used and
+     * only [mixedToo] = false leaves them out (the automatic pick never takes them).
+     */
+    suspend fun exactCoinSources(mixedToo: Boolean = true): List<Scanner.SpendableUtxo> {
         val mixed = com.kilombino.pyblockwatch.coinjoin.CoinjoinHub.states.value.map { it.mixScript.toList() }.toSet()
         val cs = _state.value.chains[Chain.BLAKE2B] ?: return emptyList()
         val endpoint = store.endpoint(Chain.BLAKE2B)
@@ -1948,7 +1958,7 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
         val u = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             scanner.gatherUtxos(cs.rows.filter { it.isUsed }, endpoint, store.pinnedFingerprint(endpoint))
         }
-        return notInCoinjoin(Chain.BLAKE2B, u).filter { it.height > 0 && coinScript(it).toList() !in mixed }
+        return notInCoinjoin(Chain.BLAKE2B, u).filter { it.height > 0 && (mixedToo || coinScript(it).toList() !in mixed) }
             .sortedByDescending { it.value }
     }
 
@@ -1978,8 +1988,8 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
                 val mixed = com.kilombino.pyblockwatch.coinjoin.CoinjoinHub.states.value.map { it.mixScript.toList() }.toSet()
                 // Paid with confirmed coins of either kind (the ones chosen, or the biggest first);
                 // the exact coin itself is of the pool's type.
-                val coins = exactCoinSources()
-                require(selected.none { coinScript(it).toList() in mixed }) { "A mixed output can't pay for it: that would undo the mix." }
+                // Picked by hand, a mixed coin may pay for it (the screen warned); picked for the user, never.
+                val coins = exactCoinSources(mixedToo = false)
                 // Every ticked coin goes in, as coin control says; with none ticked, the biggest
                 // first until they cover it.
                 val pick = mutableListOf<Scanner.SpendableUtxo>(); var sum = 0L
