@@ -427,8 +427,11 @@ private fun CoinPicker(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Column(Modifier.weight(1f)) {
-                        Text("${groupSats(u.value)} sats" + if (u.value == exact) "  ★ EXACT" else "",
-                            color = if (u.value == exact) Good else TextMain, style = MaterialTheme.typography.bodyMedium)
+                        Row {
+                            Text("${groupSats(u.value)} sats" + if (u.value == exact) "  ★ EXACT" else "",
+                                color = if (u.value == exact) Good else TextMain, style = MaterialTheme.typography.bodyMedium)
+                            if (vm.isMixedCoin(u)) Text(" · mixed", color = Warn, style = MaterialTheme.typography.bodyMedium)
+                        }
                         Text(vm.coinAddress(u)?.let { shortAddress(it) } ?: "${u.txid.take(10)}…:${u.vout}",
                             color = TextFaint, style = MaterialTheme.typography.bodySmall)
                     }
@@ -444,6 +447,11 @@ private fun CoinPicker(
                     "it fits a pool at a lower rate", color = Warn, style = MaterialTheme.typography.bodySmall)
             }
         }
+        // A seat's coins are tied together by the round itself: a mixed one with others undoes its mix.
+        val mixedChosen = chosen.count { vm.isMixedCoin(it) }
+        if (mixedChosen > 0 && chosen.size > 1) Text(
+            "A mixed coin in one seat with other coins ties them together: the round shows they are one person's. Remix mixed coins one at a time.",
+            color = Warn, style = MaterialTheme.typography.bodySmall)
         if (chosen.isNotEmpty()) {
             Spacer(Modifier.height(4.dp))
             Text(when {

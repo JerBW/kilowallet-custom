@@ -1895,7 +1895,9 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
             scanner.gatherUtxos(cs.rows.filter { it.isUsed }, endpoint, store.pinnedFingerprint(endpoint))
         }
         // One type per pool: every input and output of a round must look the same.
-        return notInCoinjoin(Chain.BLAKE2B, u).filter { it.height > 0 && it.type == tag }.sortedByDescending { it.value }
+        val coins = notInCoinjoin(Chain.BLAKE2B, u).filter { it.height > 0 && it.type == tag }.sortedByDescending { it.value }
+        checkMixed(coins) // so the picker can say which ones came out of a round
+        return coins
     }
 
     /**
