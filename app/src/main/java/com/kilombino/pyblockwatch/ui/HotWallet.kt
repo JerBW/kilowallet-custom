@@ -990,6 +990,7 @@ fun ReceiveSheet(vm: WalletViewModel, accent: Color, onClose: () -> Unit) {
     // Every unused address, the ones skipped below the last used one included: ◀ ▶ move among them.
     val unused = remember { vm.unusedReceiveIndexes() }
     var index by remember { mutableStateOf(vm.nextReceiveIndex()) }
+    var choosingUnused by remember { mutableStateOf(false) }
     val pair = remember(index) { vm.receiveAddress(index) }
     var sweeping by remember { mutableStateOf(false) }
     if (sweeping) {
@@ -1035,6 +1036,84 @@ fun ReceiveSheet(vm: WalletViewModel, accent: Color, onClose: () -> Unit) {
                     shape = RoundedCornerShape(12.dp), modifier = Modifier.weight(1f),
                 ) { Text(if (copier.copied) "COPIED ✓" else "COPY", style = MaterialTheme.typography.titleMedium) }
             }
+            Spacer(Modifier.height(8.dp))
+
+            Button(
+                onClick = { choosingUnused = true },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = PanelSoft,
+                    contentColor = accent
+                ),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    "CHOOSE UNUSED ADDRESS",
+                    style = MaterialTheme.typography.titleMedium
+                )
+            }
+
+            if (choosingUnused) {
+                AlertDialog(
+                    onDismissRequest = { choosingUnused = false },
+                    title = {
+                        Text(
+                            "Choose unused address",
+                            color = TextMain,
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                    },
+                    text = {
+                        Column(
+                            Modifier
+                                .fillMaxWidth()
+                                .height(360.dp)
+                                .verticalScroll(rememberScrollState())
+                        ) {
+                            unused.forEach { i ->
+                                val p = vm.receiveAddress(i)
+                                if (p != null) {
+                                    val (a, path) = p
+
+                                    Row(
+                                        Modifier
+                                            .fillMaxWidth()
+                                            .clickable {
+                                                index = i
+                                                choosingUnused = false
+                                            }
+                                            .padding(vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(Modifier.weight(1f)) {
+                                            Text(
+                                                "#$i  ·  $path",
+                                                color = if (i == index) accent else TextMain,
+                                                style = MaterialTheme.typography.bodyMedium
+                                            )
+                                            Text(
+                                                a,
+                                                color = TextFaint,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                fontFamily = FontFamily.Monospace
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        TextButton(onClick = { choosingUnused = false }) {
+                            Text("CLOSE", color = accent)
+                        }
+                    },
+                    containerColor = PanelBg,
+                    titleContentColor = TextMain,
+                    textContentColor = TextSoft,
+                )
+            }
+
             Spacer(Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 val prev = unused.lastOrNull { it < index }
