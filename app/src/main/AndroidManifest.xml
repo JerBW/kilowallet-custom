@@ -15,7 +15,10 @@
     <!-- In-app updates: the new release's APK is handed to Android's installer. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
+    <!-- memtagMode off: LND (Go) aborts on memory-tagged pointers, which GrapheneOS turns on
+         for apps on Pixels with MTE (SIGABRT inside libgojni.so, 15 Oct 2026). -->
     <application
+        android:memtagMode="off"
         android:name=".data.KilowalletApp"
         android:allowBackup="false"
         android:networkSecurityConfig="@xml/network_security_config"
