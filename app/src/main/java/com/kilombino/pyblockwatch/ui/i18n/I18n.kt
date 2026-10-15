@@ -1,0 +1,107 @@
+package com.kilombino.pyblockwatch.ui.i18n
+
+import android.content.Context
+import androidx.compose.runtime.mutableStateOf
+import org.json.JSONObject
+import java.util.concurrent.ConcurrentHashMap
+
+/**
+ * The app's language. The code is written in English; every text shown goes through [tr],
+ * which looks it up in the language's table (assets/i18n/<lang>.json, made from the code's own
+ * strings). Strings the code builds with values ("{0} sats each") match as templates; ones it
+ * builds by joining pieces are translated piece by piece. Anything not found stays in English.
+ * Spanish unless chosen otherwise in settings.
+ */
+object I18n {
+    const val ES = "es"; const val EN = "en"; const val ZH = "zh"
+    val LANGUAGES = listOf(ES to "Español", EN to "English", ZH to "中文")
+    private const val PREFS = "pyblockwatch"
+    private const val KEY = "ui_lang"
+
+    /** Read by every [Text]: changing it redraws the screens. */
+    val lang = mutableStateOf(ES)
+
+    @Volatile private var app: Context? = null
+    /** Where a language's table comes from: the APK's assets, or (tests) any reader. */
+    @Volatile internal var loader: ((String) -> String?)? = null
+
+    /** Once, at start: the language chosen before. */
+    fun init(ctx: Context) {
+        val c = ctx.applicationContext
+        app = c
+        loader = { l -> runCatching { c.assets.open("i18n/$l.json").bufferedReader().use { it.readText() } }.getOrNull() }
+        lang.value = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY, ES)?.takeIf { l -> LANGUAGES.any { it.first == l } } ?: ES
+    }
+
+    fun set(ctx: Context, l: String) {
+        lang.value = l
+        ctx.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY, l).apply()
+    }
+
+    private class Template(val regex: Regex, val out: String, val fragment: Boolean)
+    private class Table(
+        val exact: Map<String, String>, val upper: Map<String, String>, val templates: List<Template>,
+        val prefixes: List<Pair<String, String>>, val suffixes: List<Pair<String, String>>,
+    )
+
+    private val tables = ConcurrentHashMap<String, Table>()
+    private val cache = ConcurrentHashMap<String, String>()
+    private val bullet = Regex("""^([•·\-–]\s+)(.+)$""", RegexOption.DOT_MATCHES_ALL)
+    private val placeholder = Regex("""\{\d+\}""")
+
+    private fun table(l: String): Table? = tables[l] ?: run {
+        val o = runCatching { JSONObject(loader?.invoke(l) ?: return null) }.getOrNull() ?: return null
+        val exact = HashMap<String, String>(); val upper = HashMap<String, String>()
+        val templates = ArrayList<Template>(); val prefixes = ArrayList<Pair<String, String>>(); val suffixes = ArrayList<Pair<String, String>>()
+        for (en in o.keys()) {
+            val out = o.getString(en)
+            if (placeholder.containsMatchIn(en)) {
+                val pattern = en.split(placeholder).joinToString("(.+?)") { Regex.escape(it) }
+                val frag = en.last().isWhitespace() || en.last() in "(≈:—-"
+                templates += Template(Regex("^$pattern" + if (frag) "" else "$", RegexOption.DOT_MATCHES_ALL), out, frag)
+            } else {
+                exact[en] = out
+                // "BEFORE YOU TURN IT ON": the code upper-cases a mixed-case string.
+                if (en.any { it.isLowerCase() }) upper.putIfAbsent(en.uppercase(), out.uppercase())
+                if (en.length >= 3 && (en.last().isWhitespace() || en.endsWith(": ") || en.endsWith("("))) prefixes += en to out
+                if (en.length >= 3 && (en.first().isWhitespace() || en.first() in ".,)—")) suffixes += en to out
+            }
+        }
+        prefixes.sortByDescending { it.first.length }; suffixes.sortByDescending { it.first.length }
+        templates.sortByDescending { it.regex.pattern.length } // the most specific first
+        Table(exact, upper, templates, prefixes, suffixes).also { tables[l] = it }
+    }
+
+    /** [s] in the app's language (as is in English, or when there is no translation). */
+    fun tr(s: String): String {
+        val l = lang.value
+        if (l == EN || s.isBlank()) return s
+        val key = "$l:$s"
+        cache[key]?.let { return it }
+        val t = table(l) ?: return s
+        val out = translate(t, s, 0)
+        if (cache.size > 20_000) cache.clear()
+        cache[key] = out
+        return out
+    }
+
+    private fun translate(t: Table, s: String, depth: Int): String {
+        t.exact[s]?.let { return it }
+        t.upper[s]?.let { return it }
+        if (depth > 4 || s.isEmpty()) return s
+        for (tp in t.templates) {
+            val m = tp.regex.find(s) ?: continue
+            var out = tp.out
+            // The placeholders' values, translated themselves when they are words ("Taproot", "OPEN"…).
+            m.groupValues.drop(1).forEachIndexed { i, v -> out = out.replace("{$i}", translate(t, v, depth + 1)) }
+            return if (tp.fragment) out + translate(t, s.substring(m.range.last + 1), depth + 1) else out
+        }
+        // A list item ("•  …"), pieces joined with " · ", or paragraphs: each piece on its own.
+        bullet.find(s)?.let { m -> return m.groupValues[1] + translate(t, m.groupValues[2], depth + 1) }
+        if (" · " in s) return s.split(" · ").joinToString(" · ") { translate(t, it, depth + 1) }
+        if ("\n\n" in s) return s.split("\n\n").joinToString("\n\n") { translate(t, it, depth + 1) }
+        for ((en, out) in t.prefixes) if (s.startsWith(en)) return out + translate(t, s.substring(en.length), depth + 1)
+        for ((en, out) in t.suffixes) if (s.endsWith(en)) return translate(t, s.substring(0, s.length - en.length), depth + 1) + out
+        return s
+    }
+}

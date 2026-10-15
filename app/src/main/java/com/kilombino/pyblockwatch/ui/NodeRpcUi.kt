@@ -12,7 +12,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
-import androidx.compose.material3.Text
+import com.kilombino.pyblockwatch.ui.i18n.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -90,7 +90,9 @@ fun RpcNodePanel(vm: WalletViewModel, accent: androidx.compose.ui.graphics.Color
                 label = { Text("password", style = MaterialTheme.typography.bodySmall) }, visualTransformation = PasswordVisualTransformation(),
                 textStyle = MaterialTheme.typography.bodySmall, singleLine = true, modifier = Modifier.weight(1f))
         }
-        Row {
+        // Wraps onto a second line when the words are longer (Spanish, Chinese).
+        @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+        androidx.compose.foundation.layout.FlowRow {
             TextButton(onClick = {
                 if (ContextCompat.checkSelfPermission(ctx, android.Manifest.permission.CAMERA) == android.content.pm.PackageManager.PERMISSION_GRANTED) scanning = true
                 else camera.launch(android.Manifest.permission.CAMERA)

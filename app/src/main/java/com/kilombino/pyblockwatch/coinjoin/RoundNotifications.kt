@@ -86,7 +86,7 @@ object RoundNotifications {
 
         fun views(layout: Int, big: Boolean) = RemoteViews(ctx.packageName, layout).apply {
             // Folded there is room for one line: the amount and the people (the dots say the step).
-            setTextViewText(R.id.cj_title, if (big) title else "${sats(st.terms.amount, masked)} sats · " + when (st.phase) {
+            setTextViewText(R.id.cj_title, com.kilombino.pyblockwatch.ui.i18n.I18n.tr(if (big) title else "${sats(st.terms.amount, masked)} sats · " + when (st.phase) {
                 PoolSession.Phase.JOINING -> "joining"
                 PoolSession.Phase.OPEN -> "$people/${st.terms.maxPeers} people"
                 PoolSession.Phase.VOTING -> "$people people · vote"
@@ -94,10 +94,10 @@ object RoundNotifications {
                 PoolSession.Phase.BROADCAST -> "$people people · sent"
                 PoolSession.Phase.CONFIRMED -> "confirmed"
                 else -> "cancelled"
-            })
-            setTextViewText(R.id.cj_status, status)
+            }))
+            setTextViewText(R.id.cj_status, com.kilombino.pyblockwatch.ui.i18n.I18n.tr(status))
             setTextColor(R.id.cj_status, color)
-            if (big) setTextViewText(R.id.cj_where, where)
+            if (big) setTextViewText(R.id.cj_where, com.kilombino.pyblockwatch.ui.i18n.I18n.tr(where))
             val dots = intArrayOf(R.id.cj_dot1, R.id.cj_dot2, R.id.cj_dot3, R.id.cj_dot4, R.id.cj_dot5)
             val bars = intArrayOf(R.id.cj_bar1, R.id.cj_bar2, R.id.cj_bar3, R.id.cj_bar4)
             for (i in 1..STEPS) {
@@ -120,7 +120,7 @@ object RoundNotifications {
         val live = st.phase !in final
         return Notification.Builder(ctx, CHANNEL)
             .setSmallIcon(android.R.drawable.stat_notify_sync)
-            .setContentTitle(title).setContentText(status)
+            .setContentTitle(com.kilombino.pyblockwatch.ui.i18n.I18n.tr(title)).setContentText(com.kilombino.pyblockwatch.ui.i18n.I18n.tr(status))
             .setStyle(Notification.DecoratedCustomViewStyle())
             .setCustomContentView(views(R.layout.cj_round_small, false))
             .setCustomBigContentView(views(R.layout.cj_round_big, true))

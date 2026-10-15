@@ -49,7 +49,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
-import androidx.compose.material3.Text
+import com.kilombino.pyblockwatch.ui.i18n.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -161,9 +161,9 @@ class MainActivity : FragmentActivity() {
                                 if (now) when (o) {
                                     is com.kilombino.pyblockwatch.data.UpdateCheck.Outcome.Newer -> {}
                                     com.kilombino.pyblockwatch.data.UpdateCheck.Outcome.UpToDate -> android.widget.Toast.makeText(this@MainActivity,
-                                        "You have the latest Kilowallet ($current).", android.widget.Toast.LENGTH_SHORT).show()
+                                        com.kilombino.pyblockwatch.ui.i18n.I18n.tr("You have the latest Kilowallet ($current)."), android.widget.Toast.LENGTH_SHORT).show()
                                     com.kilombino.pyblockwatch.data.UpdateCheck.Outcome.Unreachable -> android.widget.Toast.makeText(this@MainActivity,
-                                        "Could not reach GitHub to check. Try again in a moment.", android.widget.Toast.LENGTH_LONG).show()
+                                        com.kilombino.pyblockwatch.ui.i18n.I18n.tr("Could not reach GitHub to check. Try again in a moment."), android.widget.Toast.LENGTH_LONG).show()
                                 }
                             }
                             kotlinx.coroutines.delay(5 * 60 * 1000L)
@@ -941,6 +941,18 @@ internal fun SettingsPanel(
         SectionLabel("settings", accent)
         Spacer(Modifier.height(10.dp))
 
+        // The app's language: Spanish unless chosen otherwise (the names are each in its own language).
+        Text("Language", style = MaterialTheme.typography.bodyMedium, color = TextMain)
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            val ctx = LocalContext.current
+            com.kilombino.pyblockwatch.ui.i18n.I18n.LANGUAGES.forEach { (code, name) ->
+                FiatChip(name, com.kilombino.pyblockwatch.ui.i18n.I18n.lang.value == code, accent) {
+                    com.kilombino.pyblockwatch.ui.i18n.I18n.set(ctx, code)
+                }
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+
         // The spamchain is not a tab in advanced mode: it opens from here.
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
@@ -1217,7 +1229,7 @@ internal fun SettingsPanel(
             }
             // Asks now, even about a version once answered NOT NOW, and with the switch off.
             TextButton(onClick = {
-                android.widget.Toast.makeText(activity, "Checking GitHub for a newer Kilowallet…", android.widget.Toast.LENGTH_SHORT).show()
+                android.widget.Toast.makeText(activity, com.kilombino.pyblockwatch.ui.i18n.I18n.tr("Checking GitHub for a newer Kilowallet…"), android.widget.Toast.LENGTH_SHORT).show()
                 com.kilombino.pyblockwatch.data.OpenTab.checkNow = true
                 com.kilombino.pyblockwatch.data.OpenTab.flow.value = com.kilombino.pyblockwatch.data.OpenTab.UPDATE
             }) { Text("CHECK NOW", color = accent, style = MaterialTheme.typography.bodySmall) }
@@ -1249,7 +1261,7 @@ internal fun SettingsPanel(
                     val fresh = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                         runCatching { com.kilombino.pyblockwatch.data.CrashReport.latest(activity) }.getOrNull() } ?: report
                     clip.setText(androidx.compose.ui.text.AnnotatedString(fresh))
-                    android.widget.Toast.makeText(activity, "Crash report copied", android.widget.Toast.LENGTH_SHORT).show()
+                    android.widget.Toast.makeText(activity, com.kilombino.pyblockwatch.ui.i18n.I18n.tr("Crash report copied"), android.widget.Toast.LENGTH_SHORT).show()
                 } }) {
                     Text("COPY THE LAST CRASH REPORT", color = accent, style = MaterialTheme.typography.bodySmall)
                 }

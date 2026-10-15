@@ -59,6 +59,7 @@ class KilowalletApp : Application() {
     override fun onCreate() {
         super.onCreate()
         CrashLog.install(this)
+        com.kilombino.pyblockwatch.ui.i18n.I18n.init(this)
         CrashLog.captureNativeErrors(this)
     }
 }

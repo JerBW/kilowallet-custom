@@ -216,11 +216,11 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
     /** A Keystore cipher to decrypt the seed; authorise it with BiometricPrompt first. */
     fun seedDecryptCipher() = seedVault.decryptCipher()
 
-    fun toast(msg: String) = android.widget.Toast.makeText(getApplication(), msg, android.widget.Toast.LENGTH_LONG).show()
+    fun toast(msg: String) = android.widget.Toast.makeText(getApplication(), com.kilombino.pyblockwatch.ui.i18n.I18n.tr(msg), android.widget.Toast.LENGTH_LONG).show()
 
     /** [seedDecryptCipher] for a confirm button: when it fails, say why instead of doing nothing. */
     fun seedCipherOrToast(): javax.crypto.Cipher? = runCatching { seedVault.decryptCipher() }.getOrElse { e ->
-        android.widget.Toast.makeText(getApplication(), e.message ?: "The wallet key could not be opened.", android.widget.Toast.LENGTH_LONG).show()
+        android.widget.Toast.makeText(getApplication(), com.kilombino.pyblockwatch.ui.i18n.I18n.tr(e.message ?: "The wallet key could not be opened."), android.widget.Toast.LENGTH_LONG).show()
         null
     }
 

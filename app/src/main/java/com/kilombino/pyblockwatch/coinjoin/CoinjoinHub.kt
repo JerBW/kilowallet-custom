@@ -396,8 +396,8 @@ object CoinjoinHub {
         ensureChannel(ctx)
         val n = Notification.Builder(ctx, CHANNEL)
             .setSmallIcon(android.R.drawable.stat_notify_sync)
-            .setContentTitle(title).setContentText(text)
-            .setStyle(Notification.BigTextStyle().bigText(text))
+            .setContentTitle(com.kilombino.pyblockwatch.ui.i18n.I18n.tr(title)).setContentText(com.kilombino.pyblockwatch.ui.i18n.I18n.tr(text))
+            .setStyle(Notification.BigTextStyle().bigText(com.kilombino.pyblockwatch.ui.i18n.I18n.tr(text)))
             .setAutoCancel(true).setContentIntent(openApp(ctx)).build()
         (ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).notify(id, n)
     }

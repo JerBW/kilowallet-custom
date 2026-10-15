@@ -93,7 +93,7 @@ class CoinjoinService : Service() {
             } ?: "Coinjoin"
             return Notification.Builder(ctx, CoinjoinHub.CHANNEL)
                 .setSmallIcon(android.R.drawable.stat_notify_sync)
-                .setContentTitle("Coinjoin").setContentText(text)
+                .setContentTitle("Coinjoin").setContentText(com.kilombino.pyblockwatch.ui.i18n.I18n.tr(text))
                 .setOngoing(true).setOnlyAlertOnce(true)
                 .setContentIntent(CoinjoinHub.openApp(ctx)).build()
         }
