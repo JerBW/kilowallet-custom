@@ -30,6 +30,8 @@ object HeaderChain {
         "000000000000000000"
 
     const val INTERVAL = 2016
+    /** The least BLAKE2b work a block before the checkpoint must show: just easier than the easiest real one (0x1a00f0b5). */
+    const val BLAKE2B_FLOOR_BITS = 0x1a00ffffL
     private const val TIMESPAN = 14L * 24 * 60 * 60
     private val POW_LIMIT = BigInteger("00000000ffffffffffffffffffffffffffffffffffffffffffffffffffffffff", 16)
     private const val SIZE = 164
@@ -137,7 +139,9 @@ object HeaderChain {
      * Whether [txid] is in block [height], by its merkle branch against the verified header:
      * true or false, or null when the block is not verified yet or the server gave no branch.
      * Below the checkpoint, where no header is held, the header the server gives must meet its
-     * own target at no less than [floorBits].
+     * own target at no less than [floorBits]; from the BLAKE2b activation on, it must be a BLAKE2b
+     * header and the floor is [BLAKE2B_FLOOR_BITS] (the activation cut the difficulty: blocks
+     * 961640–967679 are easier than [floorBits], down to 0x1a00f0b5).
      */
     @Synchronized
     fun proves(client: ElectrumClient, txid: String, height: Int, floorBits: Long): Boolean? {
@@ -146,9 +150,11 @@ object HeaderChain {
         if (isProven(txid, height)) return true
         if (height < CHECKPOINT_HEIGHT) return runCatching {
             val header = BlockHeader.parse(client.blockHeader(height))
+            val blake = height >= Chain.BLAKE2B_FORK_HEIGHT
+            val floor = if (blake) BLAKE2B_FLOOR_BITS else floorBits
             val (branch, pos) = client.merkle(txid, height)
-            BlockHeader.inBlock(txid, branch, pos, header) && BlockHeader.meetsItsTarget(header) &&
-                BlockHeader.target(header.bits) <= BlockHeader.target(floorBits)
+            (!blake || header.extended) && BlockHeader.inBlock(txid, branch, pos, header) && BlockHeader.meetsItsTarget(header) &&
+                BlockHeader.target(header.bits) <= BlockHeader.target(floor)
         }.getOrNull()?.also { if (it) remember("$txid@h$height") }
         val header = chain.getOrNull(height - CHECKPOINT_HEIGHT) ?: return null
         val key = "$txid@${hashes[height - CHECKPOINT_HEIGHT]}"
