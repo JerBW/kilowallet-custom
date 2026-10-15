@@ -240,6 +240,13 @@ class MainActivity : FragmentActivity() {
                     }
                     // The last run ended on an error: offer to share what failed (nothing is sent by itself).
                     var crash by remember { mutableStateOf(com.kilombino.pyblockwatch.data.CrashLog.pending(this@MainActivity)) }
+                    // A crash inside a native library (LND's Go, the Ark engine) never reaches the
+                    // handler above: Android's own record of it is read instead, once.
+                    LaunchedEffect(Unit) {
+                        if (crash == null) crash = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            runCatching { com.kilombino.pyblockwatch.data.CrashReport.fresh(this@MainActivity)?.text }.getOrNull()
+                        }
+                    }
                     crash?.let { report ->
                         AlertDialog(
                             onDismissRequest = {},
@@ -1231,6 +1238,12 @@ internal fun SettingsPanel(
                 }
                 TextButton(onClick = { Palette.choose(activity, true); activity.recreate() }) {
                     Text("BLUE", color = if (Palette.isBlue) Palette.BLUE.accent else TextFaint, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+            com.kilombino.pyblockwatch.data.CrashReport.last(activity)?.let { report ->
+                val clip = androidx.compose.ui.platform.LocalClipboardManager.current
+                TextButton(onClick = { clip.setText(androidx.compose.ui.text.AnnotatedString(report)) }) {
+                    Text("COPY THE LAST CRASH REPORT", color = accent, style = MaterialTheme.typography.bodySmall)
                 }
             }
             // What protects you right now, for checking: the native crypto and the verified headers.
