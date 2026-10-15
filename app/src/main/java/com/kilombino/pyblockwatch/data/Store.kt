@@ -167,6 +167,21 @@ class Store(context: Context, private val profile: String = HOT) {
     }
 
     /**
+     * Every transaction id this wallet has already seen on [chain]. Null means this
+     * installation predates txid tracking and should be seeded silently on the next look.
+     * Keeping this separate from [pendingMap] lets the watcher recognize a payment first
+     * discovered already confirmed, without treating the whole wallet balance delta as one tx.
+     */
+    fun knownTxids(chain: Chain): Set<String>? =
+        if (prefs.contains(k(keyKnownTxids(chain))))
+            prefs.getStringSet(k(keyKnownTxids(chain)), emptySet())?.toSet() ?: emptySet()
+        else null
+
+    fun setKnownTxids(chain: Chain, txids: Set<String>) {
+        prefs.edit().putStringSet(k(keyKnownTxids(chain)), txids.toSet()).apply()
+    }
+
+    /**
      * Which home screen to show: "simple" (balance, Send, Receive, fiat) or "advanced"
      * (everything else). Null until the user has chosen once.
      */
@@ -311,6 +326,7 @@ class Store(context: Context, private val profile: String = HOT) {
             Chain.entries.forEach {
                 remove(k(keyTotal(it))); remove(k(keyConf(it))); remove(k(keyUnconf(it)))
                 remove(k(keyNotConf(it))); remove(k(keyNotUnconf(it))); remove(k(keyPending(it)))
+                remove(k(keyKnownTxids(it)))
             }
         }.apply()
     }
@@ -359,6 +375,7 @@ class Store(context: Context, private val profile: String = HOT) {
         private fun keyNotConf(c: Chain) = "notconf_${c.id}"
         private fun keyNotUnconf(c: Chain) = "notunconf_${c.id}"
         private fun keyPending(c: Chain) = "pending_${c.id}"
+        private fun keyKnownTxids(c: Chain) = "known_txids_${c.id}"
         private fun keyPin(e: NodeEndpoint) = "pin_${e.host}_${e.port}"
     }
 }
