@@ -29,7 +29,7 @@ enum class Chain(
         ticker = "₿",
         defaultHost = "fulcrum.kilombino.com",
         defaultPort = 17717,
-        accent = 0xFFB96BFF,
+        accent = 0xFF278BF5,
         blurb = "The BLAKE2b proof-of-work fork. 164-byte headers.",
     ),
     SHA256(
