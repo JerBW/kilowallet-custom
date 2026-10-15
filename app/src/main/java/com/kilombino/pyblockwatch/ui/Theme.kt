@@ -21,18 +21,15 @@ object Palette {
         Color(0xFFDCD0EC), Color(0xFFA99CC4), Color(0xFF6C5C86))
     val BLUE = Set(Color(0xFF278BF5), Color(0x2E278BF5), Color(0xFF050A12), Color(0xFF08101C),
         Color(0xFFD0DCEC), Color(0xFF9CB0C8), Color(0xFF5C7090))
-    @Volatile var current: Set = PURPLE
+    @Volatile var current: Set = BLUE
     val isBlue: Boolean get() = current === BLUE
 
     fun load(ctx: android.content.Context) {
-        current = if (ctx.getSharedPreferences("pyblockwatch", android.content.Context.MODE_PRIVATE)
-                .getString("palette", "purple") == "blue") BLUE else PURPLE
+        current = BLUE
     }
 
     fun choose(ctx: android.content.Context, blue: Boolean) {
-        ctx.getSharedPreferences("pyblockwatch", android.content.Context.MODE_PRIVATE).edit()
-            .putString("palette", if (blue) "blue" else "purple").apply()
-        current = if (blue) BLUE else PURPLE
+        current = BLUE
     }
 }
 

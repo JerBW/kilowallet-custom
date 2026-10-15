@@ -1258,18 +1258,7 @@ internal fun SettingsPanel(
                 Switch(checked = StreetMode.byDefault, onCheckedChange = { StreetMode.setByDefault(activity, it) },
                     colors = switchColors(accent))
             }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("Colour", style = MaterialTheme.typography.bodyMedium, color = TextMain)
-                    Explain("The app's accent: purple, or blue (with Lightning in gold).")
-                }
-                TextButton(onClick = { Palette.choose(activity, false); activity.recreate() }) {
-                    Text("PURPLE", color = if (!Palette.isBlue) Palette.PURPLE.accent else TextFaint, style = MaterialTheme.typography.bodySmall)
-                }
-                TextButton(onClick = { Palette.choose(activity, true); activity.recreate() }) {
-                    Text("BLUE", color = if (Palette.isBlue) Palette.BLUE.accent else TextFaint, style = MaterialTheme.typography.bodySmall)
-                }
-            }
+
             com.kilombino.pyblockwatch.data.CrashReport.last(activity)?.let { report ->
                 val clip = androidx.compose.ui.platform.LocalClipboardManager.current
                 val crashScope = rememberCoroutineScope()
