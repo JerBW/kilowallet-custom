@@ -2018,8 +2018,13 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
         val u = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             scanner.gatherUtxos(cs.rows.filter { it.isUsed }, endpoint, store.pinnedFingerprint(endpoint))
         }
+        // A coin already seated in another pool, even one still waiting for people, is not offered:
+        // taking it for this pool would spend it (or make a perfect coin from it) and drop that seat.
+        // A normal send may still use it (notInCoinjoin), and leaves that pool.
+        val seated = com.kilombino.pyblockwatch.coinjoin.CoinjoinHub.waitingOutpoints(getApplication()).keys
         // One type per pool: every input and output of a round must look the same.
-        val coins = notInCoinjoin(Chain.BLAKE2B, u).filter { it.height > 0 && it.type == tag }.sortedByDescending { it.value }
+        val coins = notInCoinjoin(Chain.BLAKE2B, u).filter { it.height > 0 && it.type == tag && "${it.txid}:${it.vout}" !in seated }
+            .sortedByDescending { it.value }
         checkMixed(coins) // so the picker can say which ones came out of a round
         return coins
     }
@@ -2110,7 +2115,9 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
         val u = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             scanner.gatherUtxos(cs.rows.filter { it.isUsed }, endpoint, store.pinnedFingerprint(endpoint))
         }
-        val coins = notInCoinjoin(Chain.BLAKE2B, u).filter { it.height > 0 }
+        // Nor a coin seated in a pool still waiting for people: paying the exact coin with it would drop that seat.
+        val seated = com.kilombino.pyblockwatch.coinjoin.CoinjoinHub.waitingOutpoints(getApplication()).keys
+        val coins = notInCoinjoin(Chain.BLAKE2B, u).filter { it.height > 0 && "${it.txid}:${it.vout}" !in seated }
         checkMixed(coins)
         return coins.filter { mixedToo || (coinScript(it).toList() !in mixed && !isMixedCoin(it)) }.sortedByDescending { it.value }
     }
