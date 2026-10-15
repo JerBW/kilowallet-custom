@@ -637,6 +637,9 @@ private fun WalletScreen(state: UiState, vm: WalletViewModel, onToggleNotificati
             }
         }
 
+        // The coins (by address, with their confirmations) first, then the movements.
+        if (cs.rows.isNotEmpty()) AddressList(cs.rows, accent, vm, chain, cs.height)
+
         if (cs.transactions.isNotEmpty()) MovementsCard(cs.transactions, accent, vm.explorerFor(chain), vm, state.isHot,
             if (chain == Chain.BLAKE2B) "sats" else "poolsats", balance = cs.total)
 
@@ -669,7 +672,6 @@ private fun WalletScreen(state: UiState, vm: WalletViewModel, onToggleNotificati
         }
 
         if (!state.isHot) WatchAddressesCard(state, vm, chain, accent)
-        else if (cs.rows.isNotEmpty()) AddressList(cs.rows, accent, vm, chain, cs.height)
 
         Panel(accent = accent) {
             SectionLabel("How your coins are found", accent)
@@ -859,7 +861,7 @@ private fun ScanStatus(cs: ChainState, accent: Color, onRetry: () -> Unit) {
 }
 
 @Composable
-private fun AddressList(rows: List<AddressRow>, accent: Color, vm: WalletViewModel, chain: Chain, tip: Int) {
+internal fun AddressList(rows: List<AddressRow>, accent: Color, vm: WalletViewModel, chain: Chain, tip: Int) {
     // Only the addresses that hold something now; spent-out ones are history, not coins.
     // In derivation order: account, receive before change, then index.
     val held = rows.filter { it.total > 0 }.sortedWith(compareBy({ it.type?.ordinal ?: -1 }, { it.chainIndex }, { it.index }))
@@ -1242,7 +1244,13 @@ internal fun SettingsPanel(
             }
             com.kilombino.pyblockwatch.data.CrashReport.last(activity)?.let { report ->
                 val clip = androidx.compose.ui.platform.LocalClipboardManager.current
-                TextButton(onClick = { clip.setText(androidx.compose.ui.text.AnnotatedString(report)) }) {
+                val crashScope = rememberCoroutineScope()
+                TextButton(onClick = { crashScope.launch {
+                    val fresh = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        runCatching { com.kilombino.pyblockwatch.data.CrashReport.latest(activity) }.getOrNull() } ?: report
+                    clip.setText(androidx.compose.ui.text.AnnotatedString(fresh))
+                    android.widget.Toast.makeText(activity, "Crash report copied", android.widget.Toast.LENGTH_SHORT).show()
+                } }) {
                     Text("COPY THE LAST CRASH REPORT", color = accent, style = MaterialTheme.typography.bodySmall)
                 }
             }

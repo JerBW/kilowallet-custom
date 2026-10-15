@@ -35,6 +35,16 @@ object CrashReport {
     /** The last report kept, for settings. */
     fun last(ctx: Context): String? = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("crash_last", null)
 
+    /** The newest crash Android still has on record, described afresh (reported before or not). Blocking. */
+    fun latest(ctx: Context): String? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return last(ctx)
+        val am = ctx.getSystemService(ActivityManager::class.java) ?: return last(ctx)
+        val crash = runCatching { am.getHistoricalProcessExitReasons(ctx.packageName, 0, 5) }.getOrNull()
+            ?.firstOrNull { it.reason == ApplicationExitInfo.REASON_CRASH_NATIVE || it.reason == ApplicationExitInfo.REASON_CRASH }
+            ?: return last(ctx)
+        return describe(ctx, crash)
+    }
+
     @androidx.annotation.RequiresApi(Build.VERSION_CODES.R)
     private fun describe(ctx: Context, e: ApplicationExitInfo): String {
         val version = runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrNull()
@@ -42,12 +52,11 @@ object CrashReport {
             java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US).format(java.util.Date(e.timestamp)) +
             " · " + (if (e.reason == ApplicationExitInfo.REASON_CRASH_NATIVE) "native crash" else "crash") +
             (e.description?.let { " · $it" } ?: "")
-        // The tombstone is a protobuf; its strings (abort message, backtrace frames, logged
-        // lines) are plain text inside it. Keep the ones that say what went wrong.
+        // The tombstone is a protobuf (system/core/debuggerd/proto/tombstone.proto): its abort
+        // message (field 14), the signal (10) and the process's last log lines (18), where Go and
+        // the allocator write why they stopped. Read field by field, nothing filtered out.
         val raw = runCatching { e.traceInputStream?.use { it.readBytes() } }.getOrNull() ?: ByteArray(0)
-        val strings = printable(raw)
-        val keys = listOf("fatal error", "panic", "Abort message", "runtime:", "goroutine", "SIGABRT", "lnd", "Exception", "Caused by")
-        val wanted = strings.filter { s -> keys.any { s.contains(it, ignoreCase = true) } }.distinct().take(60)
+        val wanted = summarize(raw)
         // What the Lightning node was doing just before (its own log, not the crash itself).
         val lnd = runCatching {
             // The path Lnd.dir uses, without touching the Lnd object (which loads the Go library).
@@ -55,6 +64,46 @@ object CrashReport {
         }.getOrDefault(emptyList())
         return (listOf(head) + wanted + (if (lnd.isNotEmpty()) listOf("--- lnd.log, last lines") + lnd else emptyList()))
             .joinToString("\n").take(16_000)
+    }
+
+    /** What a tombstone says went wrong: abort message, signal, causes, the last log lines. */
+    internal fun summarize(raw: ByteArray): List<String> {
+        val top = runCatching { fields(raw) }.getOrDefault(emptyList())
+        val abort = top.filter { it.first == 14 }.mapNotNull { (_, v) -> (v as? ByteArray)?.toString(Charsets.UTF_8) }
+        val signal = top.filter { it.first == 10 }.mapNotNull { (_, v) -> (v as? ByteArray)?.let { b ->
+            runCatching { fields(b).filter { it.second is ByteArray }.joinToString(" ") { (it.second as ByteArray).toString(Charsets.UTF_8) } }.getOrNull() } }
+        // What the system made of it (a memory-tagging fault says use-after-free, overflow…).
+        val causes = top.filter { it.first == 15 }.mapNotNull { (_, v) ->
+            runCatching { (fields(v as ByteArray).firstOrNull { it.first == 1 }?.second as? ByteArray)?.toString(Charsets.UTF_8) }.getOrNull() }
+        val logs = top.filter { it.first == 18 }.flatMap { (_, v) -> runCatching { logLines(v as ByteArray) }.getOrDefault(emptyList()) }
+        return (abort.map { "Abort message: $it" } + signal.map { "Signal: $it" } + causes.map { "Cause: $it" } +
+            (if (logs.isNotEmpty()) listOf("--- the process's last log lines") + logs.takeLast(80) else emptyList()))
+            .ifEmpty { printable(raw).filter { it.contains("fatal", true) || it.contains("abort", true) || it.contains("panic", true) || it.contains("malloc", true) }.distinct().take(40) }
+    }
+
+    /** A protobuf message's top-level fields: number and value (Long for varints, ByteArray for length-delimited). */
+    private fun fields(b: ByteArray): List<Pair<Int, Any>> {
+        val out = ArrayList<Pair<Int, Any>>(); var i = 0
+        fun varint(): Long { var r = 0L; var sh = 0; while (true) { val x = b[i++].toInt() and 0xff; r = r or ((x and 0x7f).toLong() shl sh); if (x < 0x80) return r; sh += 7 } }
+        while (i < b.size) {
+            val key = varint(); val num = (key ushr 3).toInt()
+            when ((key and 7).toInt()) {
+                0 -> out += num to varint()
+                1 -> { i += 8 }
+                2 -> { val n = varint().toInt(); out += num to b.copyOfRange(i, i + n); i += n }
+                5 -> { i += 4 }
+                else -> return out
+            }
+        }
+        return out
+    }
+
+    /** A LogBuffer's messages (field 2; a LogMessage has tag 5 and message 6), as "tag: message". */
+    private fun logLines(buffer: ByteArray): List<String> = fields(buffer).filter { it.first == 2 }.mapNotNull { (_, v) ->
+        val m = fields(v as ByteArray)
+        val tag = m.firstOrNull { it.first == 5 }?.second as? ByteArray
+        val msg = m.firstOrNull { it.first == 6 }?.second as? ByteArray ?: return@mapNotNull null
+        (tag?.toString(Charsets.UTF_8)?.let { "$it: " } ?: "") + msg.toString(Charsets.UTF_8).trimEnd()
     }
 
     /** Runs of printable ASCII at least 12 long, as `strings` would list them. */
