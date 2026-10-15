@@ -187,10 +187,10 @@ fun SimpleScreen(state: UiState, vm: WalletViewModel, onToggleNotifications: (Bo
         Spacer(Modifier.height(28.dp))
         var showSettings by remember { mutableStateOf(false) }
         Row(verticalAlignment = Alignment.CenterVertically) {
-            WalletModeSwitch(state, vm, accent)
-            Spacer(Modifier.weight(1f))
+            // The switch gets what is left once ⚙, ⏻ and the logo are placed (it never pushes them out).
+            Box(Modifier.weight(1f)) { WalletModeSwitch(state, vm, accent) }
             TextButton(onClick = { showSettings = !showSettings }, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp)) {
-                Text(if (showSettings) "close" else "settings", style = MaterialTheme.typography.bodySmall, color = TextSoft)
+                Text(if (showSettings) "✕" else "⚙", style = MaterialTheme.typography.titleMedium, color = TextSoft)
             }
             TextButton(onClick = { vm.setUiMode("advanced") }, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp)) {
                 Text("advanced", style = MaterialTheme.typography.bodySmall, color = TextSoft)

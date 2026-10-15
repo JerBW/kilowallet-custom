@@ -569,14 +569,14 @@ private fun WalletScreen(state: UiState, vm: WalletViewModel, onToggleNotificati
         Spacer(Modifier.height(28.dp))
 
         Row(verticalAlignment = Alignment.CenterVertically) {
-            WalletModeSwitch(state, vm, accent)
-            Spacer(Modifier.weight(1f))
+            // The switch gets what is left once ⚙, ⏻ and the logo are placed (it never pushes them out).
+            Box(Modifier.weight(1f)) { WalletModeSwitch(state, vm, accent) }
             TextButton(onClick = { vm.setUiMode("simple") }, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp)) {
                 Text("simple", style = MaterialTheme.typography.bodySmall, color = TextSoft)
             }
             TextButton(onClick = { showSettings = !showSettings }, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp)) {
-                Text(if (showSettings) "close" else "settings",
-                     style = MaterialTheme.typography.bodySmall, color = TextSoft)
+                Text(if (showSettings) "✕" else "⚙",
+                     style = MaterialTheme.typography.titleMedium, color = TextSoft)
             }
             QuitButton(accent)
             Spacer(Modifier.width(4.dp))

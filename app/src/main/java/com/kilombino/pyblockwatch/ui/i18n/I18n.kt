@@ -88,6 +88,14 @@ object I18n {
         Table(exact, upper, templates, prefixes, suffixes).also { tables[l] = it }
     }
 
+    /** One piece of a joined string, its surrounding spaces kept ("m/84'/0'/0'/0/1  ·  receive"). */
+    private fun piece(t: Table, p: String, depth: Int): String {
+        val core = p.trim()
+        if (core.isEmpty()) return p
+        val lead = p.substring(0, p.indexOf(core)); val trail = p.substring(p.indexOf(core) + core.length)
+        return lead + translate(t, core, depth + 1) + trail
+    }
+
     /** [s] in the app's language (as is in English, or when there is no translation). */
     fun tr(s: String): String {
         val l = lang.value
@@ -114,8 +122,8 @@ object I18n {
         }
         // A list item ("•  …"), pieces joined with " · ", or paragraphs: each piece on its own.
         bullet.find(s)?.let { m -> return m.groupValues[1] + translate(t, m.groupValues[2], depth + 1) }
-        if (" · " in s) return s.split(" · ").joinToString(" · ") { translate(t, it, depth + 1) }
-        if ("\n\n" in s) return s.split("\n\n").joinToString("\n\n") { translate(t, it, depth + 1) }
+        if (" · " in s) return s.split(" · ").joinToString(" · ") { piece(t, it, depth) }
+        if ("\n\n" in s) return s.split("\n\n").joinToString("\n\n") { piece(t, it, depth) }
         for ((en, out) in t.prefixes) if (s.startsWith(en)) return out + translate(t, s.substring(en.length), depth + 1)
         for ((en, out) in t.suffixes) if (s.endsWith(en)) return translate(t, s.substring(0, s.length - en.length), depth + 1) + out
         return s

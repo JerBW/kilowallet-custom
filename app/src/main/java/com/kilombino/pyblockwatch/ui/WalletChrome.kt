@@ -48,13 +48,15 @@ fun WalletModeSwitch(state: UiState, vm: WalletViewModel, accent: Color, modifie
     if (setupWatch) WatchWalletSetup(vm, accent) { setupWatch = false }
     Row(modifier.clip(RoundedCornerShape(10.dp)).background(PanelSoft).padding(3.dp),
         horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+        // Short, so the bar keeps room for ⚙, ⏻ and the logo in every language.
         @Composable fun seg(label: String, on: Boolean, onClick: () -> Unit) = Text(label,
             style = MaterialTheme.typography.labelSmall,
             color = if (on) Ink else TextFaint,
+            maxLines = 1, softWrap = false, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
             modifier = Modifier.clip(RoundedCornerShape(8.dp))
                 .background(if (on) accent else Color.Transparent)
                 .clickable(onClick = onClick).padding(horizontal = 10.dp, vertical = 6.dp))
-        seg("HOT WALLET", state.isHot) {
+        seg("🔥 HOT", state.isHot) {
             when {
                 state.isHot -> {}
                 state.hasSeed -> Biometric.confirm(activity, "Back to the hot wallet",
@@ -62,7 +64,7 @@ fun WalletModeSwitch(state: UiState, vm: WalletViewModel, accent: Color, modifie
                 else -> vm.startSetup()   // no hot wallet yet: create or restore one
             }
         }
-        seg("WATCH-ONLY", !state.isHot) {
+        seg("👁 WATCH", !state.isHot) {
             // The watched wallet's balances and addresses are as private as the hot one's: the
             // fingerprint first, as going back to hot asks.
             if (state.isHot) Biometric.confirm(activity, "Open the watch-only wallet",

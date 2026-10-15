@@ -33,6 +33,9 @@ class I18nTest {
         assertEquals("CONTROL DE MONEDAS", I18n.tr("COIN CONTROL"))
         assertEquals("•  Recibir", I18n.tr("•  Receive"))
         assertEquals("Recibir · Monedero caliente", I18n.tr("Receive · Hot wallet"))
+        // Pieces with their own spaces around the dot keep them.
+        assertEquals("m/84'/0'/0'/0/1  ·  recibir", I18n.tr("m/84'/0'/0'/0/1  ·  receive"))
+        assertEquals("🔥 CALIENTE", I18n.tr("🔥 HOT"))
         // Not in the table: as is.
         assertEquals("xyzzy 42", I18n.tr("xyzzy 42"))
     }
