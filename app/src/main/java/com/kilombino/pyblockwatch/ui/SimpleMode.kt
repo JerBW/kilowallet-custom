@@ -236,7 +236,12 @@ fun SimpleScreen(state: UiState, vm: WalletViewModel, onToggleNotifications: (Bo
 
         // The coins with their confirmations first, then the movements.
         // Hot: the coins with their confirmations. Watch-only: its addresses, used and unused.
-        if (!showSend && !showReceive) { if (state.isHot) CoinsCard(state, vm, chain, accent) else WatchAddressesCard(state, vm, chain, accent) }
+        if (!showSend && !showReceive) {
+            // Coins first for both wallets (a tap shows the derivation, copy, explorer); the
+            // watch-only one then lists its addresses.
+            CoinsCard(state, vm, chain, accent)
+            if (!state.isHot) WatchAddressesCard(state, vm, chain, accent)
+        }
         if (!showSend && !showReceive && cs.transactions.isNotEmpty())
             MovementsCard(cs.transactions, accent, vm.explorerFor(chain), vm, state.isHot,
                 if (chain == Chain.BLAKE2B) "sats" else "poolsats", balance = cs.total)

@@ -38,7 +38,11 @@ object StreetMode {
      * for the fingerprint first, like the eye does.
      */
     fun setByDefault(activity: FragmentActivity, on: Boolean) {
-        fun apply() { byDefault = on; hidden = on; prefs(activity).edit().putBoolean("street_mode_default", on).apply() }
+        fun apply() {
+            byDefault = on; hidden = on; prefs(activity).edit().putBoolean("street_mode_default", on).commit()
+            // The coinjoin cards on the lock screen show amounts by the same setting: redraw them now.
+            Thread { runCatching { com.kilombino.pyblockwatch.coinjoin.RoundNotifications.update(activity.applicationContext) } }.start()
+        }
         if (on) apply() else Biometric.confirm(activity, "Turn street mode off", "Amounts will show without asking",
             onSuccess = { apply() }, onError = {})
     }

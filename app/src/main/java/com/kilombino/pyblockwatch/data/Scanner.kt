@@ -172,9 +172,12 @@ class Scanner(
             val amounts = netAmounts(client, txHeights.keys, rows.map { it.scriptHash }.toSet())
             val t2 = System.currentTimeMillis()
             val proof = prover(client, height)
+            // Newest first, so the proofs a look has room for go to the latest payments.
+            val spv = txHeights.entries.sortedByDescending { if (it.value <= 0) Int.MAX_VALUE else it.value }
+                .associate { (id, h) -> id to proof(id, h, amounts[id]) }
             val txs = txHeights.map { (id, h) ->
                 val a = amounts[id]
-                TxConf(id, if (h <= 0) 0 else height - h + 1, pending = h <= 0, amount = a, spv = proof(id, h, a))
+                TxConf(id, if (h <= 0) 0 else height - h + 1, pending = h <= 0, amount = a, spv = spv[id])
             }.sortedWith(compareBy({ !it.pending }, { it.confirmations }))
             android.util.Log.i("Kilowallet", "scan timing: connect+walk ${t1 - t0} ms, amounts ${t2 - t1} ms, spv ${System.currentTimeMillis() - t2} ms")
             saveDisk()
@@ -236,9 +239,12 @@ class Scanner(
             }
             val amounts = netAmounts(client, txHeights.keys, rows.map { it.scriptHash }.toSet())
             val proof = prover(client, tip)
+            // Newest first, so the proofs a look has room for go to the latest payments.
+            val spv = txHeights.entries.sortedByDescending { if (it.value <= 0) Int.MAX_VALUE else it.value }
+                .associate { (id, h) -> id to proof(id, h, amounts[id]) }
             val txs = txHeights.map { (id, h) ->
                 val a = amounts[id]
-                TxConf(id, if (h <= 0) 0 else tip - h + 1, pending = h <= 0, amount = a, spv = proof(id, h, a))
+                TxConf(id, if (h <= 0) 0 else tip - h + 1, pending = h <= 0, amount = a, spv = spv[id])
             }.sortedWith(compareBy({ !it.pending }, { it.confirmations }))
             saveDisk()
             Triple(updated, txs, tip)
@@ -380,11 +386,16 @@ class Scanner(
         val blake = runCatching { client.tipHeaderHex().length == 328 }.getOrDefault(false)
         if (!blake) return { id, h, a -> if (h > 0 && a != null && a > 0 && tip - h < SPV_WINDOW) spvCheck(client, id, h) else null }
         val verified = runCatching { com.kilombino.pyblockwatch.chain.HeaderChain.sync(client) }.getOrNull()
+        // Proofs already made cost nothing; new ones take a round trip each, so a look makes at
+        // most [SPV_PER_LOOK] of them and leaves the rest unknown (not failed) for the next looks.
+        var budget = SPV_PER_LOOK
         return { id, h, _ ->
             when {
                 h <= 0 -> null
                 verified == null -> false
-                else -> runCatching { com.kilombino.pyblockwatch.chain.HeaderChain.proves(client, id, h, SPV_FLOOR_BITS) }.getOrNull()
+                com.kilombino.pyblockwatch.chain.HeaderChain.isProven(id, h) -> true
+                budget <= 0 -> null
+                else -> { budget--; runCatching { com.kilombino.pyblockwatch.chain.HeaderChain.proves(client, id, h, SPV_FLOOR_BITS) }.getOrNull() }
             }
         }
     }
@@ -418,6 +429,8 @@ class Scanner(
         const val SPV_FLOOR_BITS = 0x191b0540L
         /** Payments are proven while they are this young (a day); older ones are long settled. */
         const val SPV_WINDOW = 144
+        /** New merkle proofs a single look makes on BTC; the rest wait for the next look. */
+        const val SPV_PER_LOOK = 15
         private val spvCache = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
 
         /**

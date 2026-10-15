@@ -9,6 +9,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
@@ -126,8 +127,13 @@ fun WatchWalletSetup(vm: WalletViewModel, accent: Color, onClose: () -> Unit) {
 @Composable
 fun WatchAddressesCard(state: UiState, vm: WalletViewModel, chain: Chain, accent: Color) {
     val cs = state.chains[chain] ?: return
-    // Unused first (to receive on), then the used ones, newest first: ten, or all on request.
-    val used = cs.rows.filter { it.chainIndex == 0 }.sortedByDescending { it.index }
+    // Unused first (to receive on), then the used ones in derivation order: ten, or all on request.
+    val used = cs.rows.filter { it.chainIndex == 0 }.sortedWith(compareBy({ it.type?.ordinal ?: -1 }, { it.index }))
+    var open by remember { mutableStateOf<Pair<String, String>?>(null) } // address, its status line
+    open?.let { (addr, status) ->
+        TxDetailDialog(addr, accent, vm.explorerFor(chain), status = status,
+            onSpeedUp = null, onClose = { open = null }, vm = vm, chain = chain, kind = "address")
+    }
     val next = vm.nextReceiveIndex()
     val unused = (next until next + 5).mapNotNull { i -> vm.receiveAddress(i)?.let { i to it } }
     var all by remember { mutableStateOf(false) }
@@ -135,7 +141,8 @@ fun WatchAddressesCard(state: UiState, vm: WalletViewModel, chain: Chain, accent
         SectionLabel("Addresses · unused and used", accent)
         Spacer(Modifier.height(8.dp))
         unused.forEach { (i, a) ->
-            Row(Modifier.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().clickable { open = a.first to "${a.second} · receive · unused" }.padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(shortAddress(a.first), style = MaterialTheme.typography.bodyMedium, color = TextMain)
                     Text("#$i · unused", style = MaterialTheme.typography.bodySmall, color = Good)
@@ -143,7 +150,8 @@ fun WatchAddressesCard(state: UiState, vm: WalletViewModel, chain: Chain, accent
             }
         }
         (if (all) used else used.take(10)).forEach { r ->
-            Row(Modifier.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().clickable { open = r.address to "${r.path} · receive · " + street("${groupSats(r.total)} sats") }
+                    .padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(shortAddress(r.address), style = MaterialTheme.typography.bodyMedium, color = TextSoft)
                     Text("#${r.index} · used", style = MaterialTheme.typography.bodySmall, color = TextFaint)

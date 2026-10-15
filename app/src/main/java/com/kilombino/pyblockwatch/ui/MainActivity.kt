@@ -603,6 +603,9 @@ private fun WalletScreen(state: UiState, vm: WalletViewModel, onToggleNotificati
             return@Column
         }
 
+        // How the look is going, right under the tabs and above the balance it explains.
+        ScanStatus(cs, accent, onRetry = { vm.scan(chain) })
+
         BalanceCard(chain, cs, accent, if (state.isHot && state.receiveTaproot && state.taprootXpub != null) ScriptType.P2TR else state.scriptType, state.nextRefreshAt, state.market, state.fiat, vm::setFiat)
 
         when {
@@ -626,8 +629,6 @@ private fun WalletScreen(state: UiState, vm: WalletViewModel, onToggleNotificati
                 }
             }
         }
-
-        ScanStatus(cs, accent, onRetry = { vm.scan(chain) })
 
         if (cs.transactions.isNotEmpty()) MovementsCard(cs.transactions, accent, vm.explorerFor(chain), vm, state.isHot,
             if (chain == Chain.BLAKE2B) "sats" else "poolsats", balance = cs.total)

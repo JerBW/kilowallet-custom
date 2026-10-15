@@ -1144,7 +1144,20 @@ private fun RoundCard(
                 Text((if (st.terms.private) "🔒 " else "") + "${groupSats(st.terms.amount)} sats each" +
                     (if (st.terms.script == ScriptType.P2TR) " · Taproot" else ""),
                     style = MaterialTheme.typography.titleMedium, color = TextMain, modifier = Modifier.weight(1f))
-                Text((if (over) "" else "step $step/$STEPS ") + if (open) "⌄" else "›",
+                // The bar shows the step; here, how long the current one has left.
+                val deadline = when (st.phase) {
+                    PoolSession.Phase.JOINING, PoolSession.Phase.OPEN -> st.terms.expiresAt
+                    PoolSession.Phase.VOTING -> st.voteDeadline
+                    PoolSession.Phase.CLOSING, PoolSession.Phase.SIGNING -> st.phaseDeadline
+                    else -> 0L
+                }
+                var now by remember { mutableStateOf(System.currentTimeMillis() / 1000) }
+                if (deadline > 0) LaunchedEffect(deadline) {
+                    while (true) { now = System.currentTimeMillis() / 1000; kotlinx.coroutines.delay(1_000) }
+                }
+                val left = deadline - now
+                Text((if (deadline > 0 && left > 0) "%d:%02d:%02d ".format(left / 3600, left % 3600 / 60, left % 60) else "") +
+                    if (open) "⌄" else "›",
                     style = MaterialTheme.typography.titleMedium, color = color)
             }
             if (!over) RoundSteps(step, accent)

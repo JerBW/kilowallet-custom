@@ -42,14 +42,20 @@ object HeaderChain {
     /** txid@blockhash proven so far: a block's contents never change. */
     private val proven = HashSet<String>()
 
-    /** The highest verified height. */
-    val tip: Int @Synchronized get() { ensure(); return CHECKPOINT_HEIGHT + chain.size - 1 }
+    /**
+     * The highest verified height. Read without the lock: a sync holds it while it waits on the
+     * network, and the settings screen must not wait with it.
+     */
+    @Volatile private var verifiedTip = CHECKPOINT_HEIGHT
+    val tip: Int get() = verifiedTip
+    private fun mark() { verifiedTip = CHECKPOINT_HEIGHT + chain.size - 1 }
 
     /** The checkpoint alone, when no directory was set (a process that never looked at a chain). */
     private fun ensure() {
         if (chain.isNotEmpty()) return
         val cp = BlockHeader.parse(CHECKPOINT_RAW)
         chain += cp; hashes += BlockHeader.blockHash(cp)
+        mark()
     }
 
     @Synchronized
@@ -76,6 +82,7 @@ object HeaderChain {
             }
         }
         runCatching { File(d, PROVEN).takeIf { it.exists() }?.readLines()?.let { proven.addAll(it.filter(String::isNotBlank)) } }
+        mark()
     }
 
     /** The verified hash of block [height], or null outside what is verified. */
@@ -92,13 +99,14 @@ object HeaderChain {
         if (client.isOwnNode) return null
         ensure()
         val serverTip = client.blockHeight()
-        if (serverTip <= tip) {
+        val held = CHECKPOINT_HEIGHT + chain.size - 1
+        if (serverTip <= held) {
             // Behind or level: its header at its tip must be ours, or it shows another branch.
             if (serverTip < CHECKPOINT_HEIGHT) return null
             val theirs = BlockHeader.blockHash(BlockHeader.parse(client.headers(serverTip, 1).first()))
-            return if (theirs == hashAt(serverTip)) tip else null
+            return if (theirs == hashAt(serverTip)) held else null
         }
-        var next = tip + 1
+        var next = held + 1
         var reorgChecked = false
         while (next <= serverTip) {
             val batch = client.headers(next, minOf(INTERVAL, serverTip - next + 1)).map(BlockHeader::parse)
@@ -118,10 +126,11 @@ object HeaderChain {
                 if (!valid(h, height)) { save(); return null }
                 chain += h; hashes += BlockHeader.blockHash(h)
             }
+            mark()
             next += batch.size
         }
         save()
-        return tip
+        return CHECKPOINT_HEIGHT + chain.size - 1
     }
 
     /**
@@ -134,22 +143,32 @@ object HeaderChain {
     fun proves(client: ElectrumClient, txid: String, height: Int, floorBits: Long): Boolean? {
         if (client.isOwnNode) return true // your own node validated the block itself
         ensure()
+        if (isProven(txid, height)) return true
         if (height < CHECKPOINT_HEIGHT) return runCatching {
             val header = BlockHeader.parse(client.blockHeader(height))
             val (branch, pos) = client.merkle(txid, height)
             BlockHeader.inBlock(txid, branch, pos, header) && BlockHeader.meetsItsTarget(header) &&
                 BlockHeader.target(header.bits) <= BlockHeader.target(floorBits)
-        }.getOrNull()
+        }.getOrNull()?.also { if (it) remember("$txid@h$height") }
         val header = chain.getOrNull(height - CHECKPOINT_HEIGHT) ?: return null
         val key = "$txid@${hashes[height - CHECKPOINT_HEIGHT]}"
-        if (key in proven) return true
         val (branch, pos) = runCatching { client.merkle(txid, height) }.getOrNull() ?: return null
         val ok = BlockHeader.inBlock(txid, branch, pos, header)
-        if (ok) {
-            proven += key
-            runCatching { dir?.let { File(it, PROVEN).appendText(key + "\n") } }
-        }
+        if (ok) remember(key)
         return ok
+    }
+
+    /** Whether [txid] was already proven in block [height] (of the verified chain, or below the checkpoint): no server call. */
+    @Synchronized
+    fun isProven(txid: String, height: Int): Boolean {
+        if (height < CHECKPOINT_HEIGHT) return "$txid@h$height" in proven
+        val hash = hashes.getOrNull(height - CHECKPOINT_HEIGHT) ?: return false
+        return "$txid@$hash" in proven
+    }
+
+    private fun remember(key: String) {
+        proven += key
+        runCatching { dir?.let { File(it, PROVEN).appendText(key + "\n") } }
     }
 
     // ------------------------------------------------------------------------------- rules
@@ -194,8 +213,9 @@ object HeaderChain {
 
     /** The highest height at which the server's branch and ours agree, within [MAX_REORG]. */
     private fun forkPoint(client: ElectrumClient): Int? {
-        val low = maxOf(CHECKPOINT_HEIGHT, tip - MAX_REORG)
-        val theirs = runCatching { client.headers(low, tip - low + 1) }.getOrNull() ?: return null
+        val top = CHECKPOINT_HEIGHT + chain.size - 1
+        val low = maxOf(CHECKPOINT_HEIGHT, top - MAX_REORG)
+        val theirs = runCatching { client.headers(low, top - low + 1) }.getOrNull() ?: return null
         var fork: Int? = null
         for ((k, hex) in theirs.withIndex()) {
             if (BlockHeader.blockHash(BlockHeader.parse(hex)) == hashAt(low + k)) fork = low + k else break
@@ -206,6 +226,7 @@ object HeaderChain {
     private fun truncateTo(height: Int) {
         val keep = height - CHECKPOINT_HEIGHT + 1
         while (chain.size > keep) { chain.removeAt(chain.size - 1); hashes.removeAt(hashes.size - 1) }
+        mark()
     }
 
     private fun save() {
@@ -227,6 +248,7 @@ object HeaderChain {
         dir = null; chain.clear(); hashes.clear(); proven.clear()
         val cp = BlockHeader.parse(CHECKPOINT_RAW)
         chain += cp; hashes += BlockHeader.blockHash(cp)
+        mark()
     }
 
     /** For tests: verify and append raw headers as a server would hand them over. */
@@ -234,8 +256,9 @@ object HeaderChain {
     internal fun appendForTest(raw: List<String>): Boolean {
         for (hex in raw) {
             val h = BlockHeader.parse(hex)
-            if (!valid(h, tip + 1)) return false
+            if (!valid(h, CHECKPOINT_HEIGHT + chain.size)) return false
             chain += h; hashes += BlockHeader.blockHash(h)
+            mark()
         }
         return true
     }
