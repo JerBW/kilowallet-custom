@@ -744,7 +744,7 @@ object Ark {
         val r = JSONObject(call("POST", "/onchain/send-selected/estimate", req))
         val amount = r.optLong("amount_sat"); val fee = r.optLong("fee_sat"); val change = r.optLong("change_sat")
         Estimate(amount, fee, amount + fee, true,
-            "From ${coins.size} chosen coin" + (if (coins.size == 1) "" else "s") + "; network fee only" +
+            (if (coins.size == 1) "From 1 chosen coin; network fee only" else "From ${coins.size} chosen coins; network fee only") +
                 (if (change > 0) "; ${change} sats of change back to the deposit." else "."))
     }.getOrElse { e -> if (e is ArkError) Estimate(0, 0, 0, false, "", e.message) else null }
 

@@ -954,14 +954,17 @@ internal fun SettingsPanel(
         SectionLabel("settings", accent)
         Spacer(Modifier.height(10.dp))
 
-        // The app's language: Spanish unless chosen otherwise (the names are each in its own language).
+        // The app's language: the phone's by default, or one fixed here (each named in its own language).
         Text("Language", style = MaterialTheme.typography.bodyMedium, color = TextMain)
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+        androidx.compose.foundation.layout.FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
             val ctx = LocalContext.current
-            com.kilombino.pyblockwatch.ui.i18n.I18n.LANGUAGES.forEach { (code, name) ->
-                FiatChip(name, com.kilombino.pyblockwatch.ui.i18n.I18n.lang.value == code, accent) {
-                    com.kilombino.pyblockwatch.ui.i18n.I18n.set(ctx, code)
-                }
+            val i18n = com.kilombino.pyblockwatch.ui.i18n.I18n
+            FiatChip("Automatic", i18n.choice.value == i18n.AUTO, accent) { i18n.set(ctx, i18n.AUTO) }
+            i18n.LANGUAGES.forEach { (code, name) ->
+                FiatChip(name, i18n.choice.value == code, accent) { i18n.set(ctx, code) }
             }
         }
         Spacer(Modifier.height(10.dp))

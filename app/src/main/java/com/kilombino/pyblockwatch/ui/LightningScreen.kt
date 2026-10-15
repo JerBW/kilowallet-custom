@@ -1236,7 +1236,8 @@ private fun CloseChannelDialog(cs: List<Lnd.Channel>, accent: Color, vm: WalletV
         title = { Text(if (cs.size > 1) "Close ${cs.size} channels?" else "Close the channel with ${c.peerAlias.ifBlank { c.peer.take(12) + "…" }}?") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.verticalScroll(androidx.compose.foundation.rememberScrollState())) {
-                Text("Your " + groupSats(cs.sumOf { it.local }) + " sats come back on-chain, minus the closing fee" + (if (cs.size > 1) "s (one transaction per channel)." else "."),
+                Text(if (cs.size > 1) "Your ${groupSats(cs.sumOf { it.local })} sats come back on-chain, minus the closing fees (one transaction per channel)."
+                    else "Your ${groupSats(cs.sumOf { it.local })} sats come back on-chain, minus the closing fee.",
                     style = MaterialTheme.typography.bodySmall)
                 if (!force) {
                     Text("Send them to:", style = MaterialTheme.typography.bodySmall)

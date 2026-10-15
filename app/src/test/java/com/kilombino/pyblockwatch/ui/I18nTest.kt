@@ -16,7 +16,7 @@ class I18nTest {
         I18n.loader = { l -> File(dir, "$l.json").takeIf { it.exists() }?.readText() }
     }
 
-    @Test fun spanishByDefaultAndEnglishAsWritten() {
+    @Test fun eachLanguageAndEnglishAsWritten() {
         I18n.lang.value = I18n.ES
         assertEquals("Recibir", I18n.tr("Receive"))
         assertEquals("Monedero caliente", I18n.tr("Hot wallet"))
@@ -38,7 +38,7 @@ class I18nTest {
     }
 
     @Test fun everyTableKeepsThePlaceholdersAndTheEdges() {
-        for (l in listOf(I18n.ES, I18n.ZH)) {
+        for (l in I18n.LANGUAGES.map { it.first }.filter { it != I18n.EN && File(dir, "$it.json").exists() }) {
             val o = JSONObject(File(dir, "$l.json").readText())
             for (k in o.keys()) {
                 val v = o.getString(k)

@@ -10,16 +10,26 @@ import java.util.concurrent.ConcurrentHashMap
  * which looks it up in the language's table (assets/i18n/<lang>.json, made from the code's own
  * strings). Strings the code builds with values ("{0} sats each") match as templates; ones it
  * builds by joining pieces are translated piece by piece. Anything not found stays in English.
- * Spanish unless chosen otherwise in settings.
+ * By default the phone's language (English when the app doesn't have it); settings can fix one.
  */
 object I18n {
+    const val AUTO = "auto"
     const val ES = "es"; const val EN = "en"; const val ZH = "zh"
-    val LANGUAGES = listOf(ES to "Español", EN to "English", ZH to "中文")
+    /** Each named in its own language. */
+    val LANGUAGES = listOf(
+        ES to "Español", EN to "English", ZH to "中文", "fr" to "Français", "it" to "Italiano",
+        "de" to "Deutsch", "ca" to "Català", "pt" to "Português",
+    )
     private const val PREFS = "pyblockwatch"
     private const val KEY = "ui_lang"
 
-    /** Read by every [Text]: changing it redraws the screens. */
-    val lang = mutableStateOf(ES)
+    /** The language shown, read by every [Text]: changing it redraws the screens. */
+    val lang = mutableStateOf(EN)
+    /** What settings say: [AUTO] or a language's code. */
+    val choice = mutableStateOf(AUTO)
+
+    /** The phone's language when the app has it, else English. */
+    fun system(): String = java.util.Locale.getDefault().language.let { l -> if (LANGUAGES.any { it.first == l }) l else EN }
 
     @Volatile private var app: Context? = null
     /** Where a language's table comes from: the APK's assets, or (tests) any reader. */
@@ -30,12 +40,18 @@ object I18n {
         val c = ctx.applicationContext
         app = c
         loader = { l -> runCatching { c.assets.open("i18n/$l.json").bufferedReader().use { it.readText() } }.getOrNull() }
-        lang.value = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY, ES)?.takeIf { l -> LANGUAGES.any { it.first == l } } ?: ES
+        val saved = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY, null)?.takeIf { l -> LANGUAGES.any { it.first == l } }
+        choice.value = saved ?: AUTO
+        lang.value = saved ?: system()
     }
 
+    /** [l]: a language's code, or [AUTO] to follow the phone. */
     fun set(ctx: Context, l: String) {
-        lang.value = l
-        ctx.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY, l).apply()
+        choice.value = l
+        lang.value = if (l == AUTO) system() else l
+        ctx.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().apply {
+            if (l == AUTO) remove(KEY) else putString(KEY, l)
+        }.apply()
     }
 
     private class Template(val regex: Regex, val out: String, val fragment: Boolean)
