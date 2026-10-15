@@ -882,9 +882,14 @@ internal fun AddressList(rows: List<AddressRow>, accent: Color, vm: WalletViewMo
             status = "${row.path} · ${if (row.chainIndex == 0) "receive" else "change"} · ${street("${groupSats(row.total)} sats")}",
             onSpeedUp = null, onClose = { open = null }, vm = vm, chain = chain, kind = "address",
             extra = {
+                val seatedHere = vm.seatedInWaitingPools()
                 cs.forEach { u ->
                     Text(street("${groupSats(u.value)} sats") + " · " + confText(u) + " · ${u.txid.take(8)}…:${u.vout}",
                         style = MaterialTheme.typography.bodySmall, color = TextSoft)
+                    if (chain == com.kilombino.pyblockwatch.chain.Chain.BLAKE2B && vm.isMixedCoin(u))
+                        Text("🌀 mixed", style = MaterialTheme.typography.bodySmall, color = Good)
+                    if ("${u.txid}:${u.vout}" in seatedHere)
+                        Text("in a pool waiting for people: sending it leaves that pool", style = MaterialTheme.typography.bodySmall, color = Warn)
                 }
             })
     }
@@ -893,6 +898,9 @@ internal fun AddressList(rows: List<AddressRow>, accent: Color, vm: WalletViewMo
         Spacer(Modifier.height(4.dp))
         Text("tap an address to copy it or open it on the explorer", style = MaterialTheme.typography.bodySmall, color = TextFaint)
         Spacer(Modifier.height(6.dp))
+        // Mixed by a coinjoin, or seated in a pool still waiting: marked as in coin control.
+        val seated = remember(coins) { vm.seatedInWaitingPools() }
+        val btc = chain == com.kilombino.pyblockwatch.chain.Chain.BLAKE2B
         held.forEach { row ->
             val cs = coins?.get(row.scriptHash)
             Row(Modifier.fillMaxWidth().clickable { open = row }.padding(vertical = 6.dp),
@@ -904,6 +912,11 @@ internal fun AddressList(rows: List<AddressRow>, accent: Color, vm: WalletViewMo
                         "${row.path}  ·  ${if (row.chainIndex == 0) "receive" else "change"}",
                         style = MaterialTheme.typography.bodySmall, color = TextFaint,
                     )
+                    val mixed = btc && cs.orEmpty().any { vm.isMixedCoin(it) }
+                    val inPool = cs.orEmpty().any { "${it.txid}:${it.vout}" in seated }
+                    if (mixed) Text("🌀 mixed", style = MaterialTheme.typography.bodySmall, color = Good)
+                    if (inPool) Text("in a pool waiting for people: sending it leaves that pool",
+                        style = MaterialTheme.typography.bodySmall, color = Warn)
                 }
                 Column(horizontalAlignment = Alignment.End) {
                     Text(street("${groupSats(row.total)} sats"),
