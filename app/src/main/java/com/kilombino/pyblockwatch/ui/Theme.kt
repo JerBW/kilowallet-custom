@@ -19,8 +19,8 @@ object Palette {
               val text: Color, val textSoft: Color, val textFaint: Color)
     val BLUE = Set(Color(0xFF278BF5), Color(0x2E278BF5), Color(0xFF050A12), Color(0xFF08101C),
         Color(0xFFD0DCEC), Color(0xFF9CB0C8), Color(0xFF5C7090))
-    /** The blue panels with BTC's orange as the general accent. */
-    val current: Set = Set(Color(0xFFF7931A), BLUE.line, BLUE.panel, BLUE.panelSoft, BLUE.text, BLUE.textSoft, BLUE.textFaint)
+    /** The blue panels with the XBT blue general accent. */
+    val current: Set = BLUE
 }
 
 val Ink = Color(0xFF000000)
