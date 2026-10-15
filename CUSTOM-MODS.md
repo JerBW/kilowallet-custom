@@ -1,13 +1,38 @@
 ﻿# Kilowallet Custom Modifications
 
-This branch carries a small set of local changes on top of upstream Kilowallet.
+This repository carries a small set of local changes on top of upstream Kilowallet.
+
+## Current known-good custom release
+
+Upstream:
+- v1.1.0
+- upstream commit: 31c181e
+
+Known-good custom tag:
+- custom-v1.1.0-known-good
+
+Current 1.1.0 custom commits:
+- 8e9c8fc custom: use specialUse foreground services
+- c40e01a custom: reliable per-transaction notifications
+- ff1fd3d custom: add unused receive-address picker
+- 0c1c24f custom: make XBT interface blue-only
+- 360cbfa build: add Windows wrapper and aapt2 verification
+- 833adc5 docs: document and verify custom modifications
+
+Previous known-good release:
+- custom-v1.0.8-known-good
+
+Original 1.0.8 custom commits:
+- 721393e custom: use specialUse foreground services
+- 9e59526 custom: reliable per-transaction notifications
+- 60d70d2 custom: add unused receive-address picker
+- 0741d09 custom: make XBT interface blue-only
+- 0bbaaf9 build: add Windows wrapper and aapt2 verification
+- 90d512b docs: document and verify custom modifications
 
 ## 1. Android foreground-service compatibility
 
-Commit:
-721393e custom: use specialUse foreground services
-
-Changes:
+Purpose:
 - Removes FOREGROUND_SERVICE_DATA_SYNC.
 - Keeps FOREGROUND_SERVICE_SPECIAL_USE.
 - WatchService uses foregroundServiceType="specialUse".
@@ -19,14 +44,11 @@ Android 15 imposes a time limit on dataSync foreground services. WatchService pr
 
 ## 2. Reliable transaction notifications
 
-Commit:
-9e59526 custom: reliable per-transaction notifications
-
 Files:
 - app/src/main/java/com/kilombino/pyblockwatch/data/Notifier.kt
 - app/src/main/java/com/kilombino/pyblockwatch/data/Store.kt
 
-Changes:
+Purpose:
 - Persistent txid + phase notification dedupe.
 - Separate mempool and first-confirmation phases.
 - Persists known transaction IDs.
@@ -38,13 +60,10 @@ Changes:
 
 ## 3. Unused receive-address picker
 
-Commit:
-60d70d2 custom: add unused receive-address picker
-
 File:
 - app/src/main/java/com/kilombino/pyblockwatch/ui/HotWallet.kt
 
-Changes:
+Purpose:
 - Adds CHOOSE UNUSED ADDRESS to Receive.
 - Shows unused receive indexes in a scrollable chooser.
 - Selecting an entry switches Receive to that exact unused address.
@@ -52,15 +71,12 @@ Changes:
 
 ## 4. Blue-only XBT interface
 
-Commit:
-0741d09 custom: make XBT interface blue-only
-
 Files:
 - app/src/main/java/com/kilombino/pyblockwatch/chain/Chain.kt
 - app/src/main/java/com/kilombino/pyblockwatch/ui/MainActivity.kt
 - app/src/main/java/com/kilombino/pyblockwatch/ui/Theme.kt
 
-Changes:
+Purpose:
 - XBT/BLAKE2b accent is #278BF5.
 - Palette defaults to and remains blue.
 - Removes Purple / Blue chooser from Settings.
@@ -68,32 +84,58 @@ Changes:
 
 ## 5. Windows build support
 
-Commit:
-0bbaaf9 build: add Windows wrapper and aapt2 verification
-
-Changes:
+Purpose:
 - Adds gradlew.bat.
 - Adds SHA-256 verification metadata for the Windows aapt2 artifact.
 
-## Upgrade procedure
+## Upgrade procedure for future upstream releases
 
 For a future upstream release:
 
-1. Fetch upstream tags.
-2. Create a new branch from the desired upstream tag.
-3. Cherry-pick the custom commits in this order:
-   - 721393e
-   - 9e59526
-   - 60d70d2
-   - 0741d09
-   - 0bbaaf9
-4. Resolve conflicts one commit at a time.
-5. Run verify-custom-mods.ps1.
-6. Build with:
-   .\gradlew.bat :app:assembleDebug
-7. Verify the APK manifest and signer.
-8. Install with adb install -r.
-9. Runtime-check WatchService and transaction notifications.
+1. Fetch upstream tags:
+   git fetch origin --tags
 
-Known-good baseline:
-upstream v1.0.8 + the five custom commits above.
+2. Create a new custom branch from the desired upstream tag.
+
+3. Reapply the custom features in this order:
+   - specialUse foreground services
+   - reliable per-transaction notifications
+   - unused receive-address picker
+   - blue-only XBT interface
+   - Windows build support
+   - maintenance documentation / verification script
+
+4. Prefer cherry-picking the most recent known-good custom commit set when it applies cleanly.
+
+5. Resolve conflicts one feature at a time.
+
+6. Run:
+   .\verify-custom-mods.ps1
+
+7. Build with:
+   .\gradlew.bat :app:assembleDebug
+
+8. Verify:
+   - package/version
+   - APK signer
+   - specialUse-only manifest
+   - blue XBT UI
+   - unused receive-address picker
+   - wallet/server settings preserved
+   - Fulcrum endpoint preserved
+   - WatchService runtime type = 0x40000000
+
+9. Install in place with:
+   adb install -r
+
+10. After validation:
+   - tag the release as custom-vX.Y.Z-known-good
+   - push the custom branch and tag to the private custom remote
+
+## Verification
+
+Run:
+
+.\verify-custom-mods.ps1
+
+A valid custom build should report that all checks passed.
