@@ -29,6 +29,7 @@ object StreetMode {
     private fun prefs(ctx: android.content.Context) = ctx.getSharedPreferences("pyblockwatch", android.content.Context.MODE_PRIVATE)
 
     fun init(ctx: android.content.Context) {
+        appCtx = ctx.applicationContext
         byDefault = prefs(ctx).getBoolean("street_mode_default", true)
         hidden = byDefault
     }
@@ -48,11 +49,18 @@ object StreetMode {
     }
 
     /** Back to the chosen default: hidden, unless street mode is turned off in settings. */
-    fun lock() { hidden = byDefault }
+    fun lock() { val was = hidden; hidden = byDefault; if (was != hidden) redrawCards() }
+
+    /** The coinjoin cards (notification shade, lock screen) follow what the app shows: redraw them. */
+    private fun redrawCards() {
+        val ctx = appCtx ?: return
+        Thread { runCatching { com.kilombino.pyblockwatch.coinjoin.RoundNotifications.update(ctx) } }.start()
+    }
+    @Volatile private var appCtx: android.content.Context? = null
 
     fun unlock(activity: FragmentActivity, onError: (String) -> Unit = {}) {
         Biometric.confirm(activity, "Unlock street mode", "Show your balances and movements",
-            onSuccess = { hidden = false }, onError = onError)
+            onSuccess = { hidden = false; redrawCards() }, onError = onError)
     }
 }
 

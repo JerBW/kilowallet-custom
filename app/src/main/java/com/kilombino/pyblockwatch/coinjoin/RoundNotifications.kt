@@ -50,7 +50,10 @@ object RoundNotifications {
     /** The card of [st]; with the amounts hidden when the app keeps them hidden (street mode). */
     fun card(ctx: Context, st: PoolSession.State): Notification {
         ensureChannel(ctx)
-        val masked = ctx.getSharedPreferences("pyblockwatch", Context.MODE_PRIVATE).getBoolean("street_mode_default", true)
+        // Hidden when street mode is on by default and the app does not show amounts right now
+        // (unlocked with the eye). A process without the app on screen keeps them hidden.
+        val masked = ctx.getSharedPreferences("pyblockwatch", Context.MODE_PRIVATE).getBoolean("street_mode_default", true) &&
+            com.kilombino.pyblockwatch.ui.StreetMode.hidden
         val step = stepOf(st)
         val people = if (st.round.isNotEmpty()) st.round.size else st.seats.size
         // The people first: "Step 1 of 5" read as one person of five when the line was cut short.

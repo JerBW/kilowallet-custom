@@ -28,6 +28,26 @@ object CrashLog {
         }
     }
 
+    /**
+     * Native code that stops on a fatal error (LND's Go runtime: "fatal error", "panic") writes
+     * why to the process's stderr, which on Android goes nowhere, and a hardened system's
+     * tombstone does not keep it either. Pointed at a private file instead, it is there for the
+     * next crash report. Kept small: cut back when it grows past half a megabyte.
+     */
+    fun captureNativeErrors(ctx: Context) {
+        runCatching {
+            val f = nativeErrors(ctx)
+            if (f.length() > 512_000) f.writeText(f.readText().takeLast(64_000))
+            f.appendText("\n=== ${java.util.Date()} · process ${android.os.Process.myPid()}\n")
+            val fd = android.system.Os.open(f.path,
+                android.system.OsConstants.O_WRONLY or android.system.OsConstants.O_CREAT or android.system.OsConstants.O_APPEND, 384 /* 0600 */)
+            android.system.Os.dup2(fd, 2)
+        }
+    }
+
+    /** Where native code's stderr goes (see [captureNativeErrors]). */
+    fun nativeErrors(ctx: Context) = File(ctx.applicationContext.noBackupFilesDir, "native-stderr.log")
+
     /** The report of the last crash, if there is one not yet dealt with. */
     fun pending(ctx: Context): String? = file(ctx).takeIf { it.exists() }?.readText()
 
@@ -39,5 +59,6 @@ class KilowalletApp : Application() {
     override fun onCreate() {
         super.onCreate()
         CrashLog.install(this)
+        CrashLog.captureNativeErrors(this)
     }
 }

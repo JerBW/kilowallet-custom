@@ -57,12 +57,21 @@ object CrashReport {
         // the allocator write why they stopped. Read field by field, nothing filtered out.
         val raw = runCatching { e.traceInputStream?.use { it.readBytes() } }.getOrNull() ?: ByteArray(0)
         val wanted = summarize(raw)
+        // What native code wrote on stderr before stopping (Go's "fatal error"/"panic"), from the
+        // run that crashed: the lines after the last process header before the crash.
+        val stderr = runCatching {
+            val lines = CrashLog.nativeErrors(ctx).readLines()
+            val runs = lines.indices.filter { lines[it].startsWith("=== ") }
+            val start = runs.lastOrNull { i -> lines[i].contains("process ${e.pid}") } ?: runs.dropLast(1).lastOrNull() ?: 0
+            val end = runs.firstOrNull { it > start } ?: lines.size
+            lines.subList(start, end).filter { it.isNotBlank() }.takeLast(60)
+        }.getOrDefault(emptyList())
         // What the Lightning node was doing just before (its own log, not the crash itself).
         val lnd = runCatching {
             // The path Lnd.dir uses, without touching the Lnd object (which loads the Go library).
             java.io.File(ctx.noBackupFilesDir, "lnd/logs/bitcoin/mainnet/lnd.log").readLines().takeLast(30)
         }.getOrDefault(emptyList())
-        return (listOf(head) + wanted + (if (lnd.isNotEmpty()) listOf("--- lnd.log, last lines") + lnd else emptyList()))
+        return (listOf(head) + wanted + (if (stderr.size > 1) listOf("--- stderr of the crashed run") + stderr else emptyList()) + (if (lnd.isNotEmpty()) listOf("--- lnd.log, last lines") + lnd else emptyList()))
             .joinToString("\n").take(16_000)
     }
 
