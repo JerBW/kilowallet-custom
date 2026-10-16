@@ -77,6 +77,23 @@ class ElectrumClient(
     var serverVersion: String? = null
         private set
 
+    /** The protocol version the server agreed to: "1.4" up to "1.6". */
+    var protocol: String = "1.4"
+        private set
+
+    /**
+     * Agree on a protocol version: anything from 1.4 to 1.6. A server whose chain has headers
+     * that are not 80 bytes (BLAKE2b's are 164) sends them in batches only from 1.6 on, so
+     * one that refuses blockchain.block.headers below it (Shulcrum 2.1) can still be verified;
+     * a server that knows only 1.4 keeps it. Nothing the app calls changes between them but
+     * blockchain.relayfee, gone in 1.6 (see [relayFeePerKb]); headers are read in either form.
+     */
+    private fun negotiate() {
+        val version = call("server.version", JSONArray().put("PyBlockWatch").put(JSONArray().put("1.4").put("1.6")))
+        serverVersion = (version as? JSONArray)?.optString(0) ?: version?.toString()
+        protocol = (version as? JSONArray)?.optString(1)?.takeIf { it.isNotEmpty() } ?: "1.4"
+    }
+
     /**
      * Connect, capturing the certificate. We do not reject on mismatch here — the
      * caller decides how to present that to the user, because silently failing and
@@ -139,8 +156,7 @@ class ElectrumClient(
         reader = BufferedReader(InputStreamReader(ssl.inputStream, Charsets.UTF_8))
         writer = BufferedWriter(OutputStreamWriter(ssl.outputStream, Charsets.UTF_8))
 
-        val version = call("server.version", JSONArray().put("PyBlockWatch").put("1.4"))
-        serverVersion = (version as? JSONArray)?.optString(0) ?: version?.toString()
+        negotiate()
     }
 
     /** Plain TCP, for a node on the local network only (see [isLocal]). */
@@ -150,8 +166,7 @@ class ElectrumClient(
         socket = raw
         reader = BufferedReader(InputStreamReader(raw.inputStream, Charsets.UTF_8))
         writer = BufferedWriter(OutputStreamWriter(raw.outputStream, Charsets.UTF_8))
-        val version = call("server.version", JSONArray().put("PyBlockWatch").put("1.4"))
-        serverVersion = (version as? JSONArray)?.optString(0) ?: version?.toString()
+        negotiate()
     }
 
     /** A private-network address (192.168.x.x, 10.x, 172.16–31.x, localhost, *.local, fd00::/8). */
@@ -188,8 +203,7 @@ class ElectrumClient(
         socket = ssl
         reader = BufferedReader(InputStreamReader(ssl.inputStream, Charsets.UTF_8))
         writer = BufferedWriter(OutputStreamWriter(ssl.outputStream, Charsets.UTF_8))
-        val version = call("server.version", JSONArray().put("PyBlockWatch").put("1.4"))
-        serverVersion = (version as? JSONArray)?.optString(0) ?: version?.toString()
+        negotiate()
         val tip = call("blockchain.headers.subscribe", JSONArray()) as? JSONObject
         val headerHex = tip?.optString("hex").orEmpty()
         if (headerHex.length != 160) throw ElectrumException("$endpoint does not follow the SHA-256 chain")
@@ -386,8 +400,23 @@ class ElectrumClient(
     /** The server's minimum relay fee, in BTC per kilobyte — the floor a transaction must clear. */
     fun relayFeePerKb(): Double {
         node?.let { return it.relayFeePerKb() }
+        if (protocolAtLeast("1.6")) {
+            // blockchain.relayfee is gone in 1.6; mempool.get_info carries the same number.
+            val info = call("mempool.get_info", JSONArray()) as? JSONObject
+            return info?.optDouble("minrelaytxfee", 0.0)?.takeIf { !it.isNaN() } ?: 0.0
+        }
         val r = call("blockchain.relayfee", JSONArray())
         return (r as? Number)?.toDouble() ?: 0.0
+    }
+
+    private fun protocolAtLeast(v: String): Boolean {
+        val a = protocol.split('.').map { it.toIntOrNull() ?: 0 }
+        val b = v.split('.').map { it.toIntOrNull() ?: 0 }
+        for (i in 0 until maxOf(a.size, b.size)) {
+            val x = a.getOrElse(i) { 0 }; val y = b.getOrElse(i) { 0 }
+            if (x != y) return x > y
+        }
+        return true
     }
 
     /** The raw (hex) transaction for [txid]; throws when the server does not know it. */
