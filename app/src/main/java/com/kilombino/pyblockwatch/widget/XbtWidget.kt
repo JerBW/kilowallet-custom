@@ -208,48 +208,51 @@ class XbtWidget : AppWidgetProvider() {
         }
 
         /**
-         * Large widget: "Difficulty   5.09 G  prev 4.63 G" and "Next in 66 blocks   ~5.93 G ▲16.6%".
-         * Medium widget ([compact], no room for two rows): "Difficulty   4.63 → 5.09 → ~5.93 G ▲16.6%".
-         * The expected change is colored like the price's; nothing shows with an older server.
+         * Large widget: "Difficulty   5.09 G ▲10.0%  prev 4.63 G" and "Next in 66 blocks   ~5.93 G ▲16.6%".
+         * Medium widget ([compact], no room for two rows): "Difficulty   5.09 G ▲10.0% → ~5.93 G ▲16.6%",
+         * the last retarget's change standing for the previous period.
+         * Changes are colored like the price's; nothing shows with an older server.
          */
         private fun difficultyRows(ctx: Context, v: RemoteViews, m: MarketData?, compact: Boolean) {
             val d = m?.difficulty
             v.setViewVisibility(R.id.diff_row, if (d == null) View.GONE else View.VISIBLE)
+            if (d == null) {
+                if (!compact) v.setViewVisibility(R.id.diff_next_row, View.GONE)
+                return
+            }
+            val muted = ctx.getColor(R.color.widget_muted)
+            val t = SpannableStringBuilder(WidgetFormat.difficultyNow(d))
+            m.difficultyPrevChangePct?.let { c ->
+                t.append(" ")
+                colored(t, WidgetFormat.pct(c), ctx.getColor(changeColor(c)))
+            }
+            val next = m.difficultyNext
             if (compact) {
-                if (d == null) return
-                val parts = WidgetFormat.difficultyChain(m.difficultyPrev, d, m.difficultyNext)
-                val muted = ctx.getColor(R.color.widget_muted)
-                val t = SpannableStringBuilder()
-                parts.forEachIndexed { i, p ->
-                    if (i > 0) colored(t, " → ", muted)
-                    // The previous period's value is muted; now and the estimate in full ink.
-                    if (m.difficultyPrev != null && i == 0) colored(t, p, muted) else t.append(p)
-                }
-                if (m.difficultyNext != null) m.difficultyChangePct?.let { c ->
-                    t.append(" ")
-                    colored(t, WidgetFormat.pct(c), ctx.getColor(changeColor(c)))
+                if (next != null) {
+                    colored(t, " → ", muted)
+                    t.append(WidgetFormat.difficultyNext(next))
+                    m.difficultyChangePct?.let { c ->
+                        t.append(" ")
+                        colored(t, WidgetFormat.pct(c), ctx.getColor(changeColor(c)))
+                    }
                 }
                 v.setTextViewText(R.id.difficulty, t)
                 return
             }
-            if (d != null) {
-                val t = SpannableStringBuilder(WidgetFormat.difficultyNow(d))
-                m.difficultyPrev?.let { p ->
-                    t.append("  ")
-                    colored(t, WidgetFormat.difficultyPrev(p), ctx.getColor(R.color.widget_muted))
-                }
-                v.setTextViewText(R.id.difficulty, t)
+            m.difficultyPrev?.let { p ->
+                t.append("  ")
+                colored(t, WidgetFormat.difficultyPrev(p), muted)
             }
-            val next = m?.difficultyNext
-            v.setViewVisibility(R.id.diff_next_row, if (d == null || next == null) View.GONE else View.VISIBLE)
-            if (d != null && next != null) {
+            v.setTextViewText(R.id.difficulty, t)
+            v.setViewVisibility(R.id.diff_next_row, if (next == null) View.GONE else View.VISIBLE)
+            if (next != null) {
                 v.setTextViewText(R.id.diff_next_label, WidgetFormat.nextLabel(m.difficultyRemainingBlocks))
-                val t = SpannableStringBuilder(WidgetFormat.difficultyNext(next))
+                val n = SpannableStringBuilder(WidgetFormat.difficultyNext(next))
                 m.difficultyChangePct?.let { c ->
-                    t.append(" ")
-                    colored(t, WidgetFormat.pct(c), ctx.getColor(changeColor(c)))
+                    n.append(" ")
+                    colored(n, WidgetFormat.pct(c), ctx.getColor(changeColor(c)))
                 }
-                v.setTextViewText(R.id.diff_next, t)
+                v.setTextViewText(R.id.diff_next, n)
             }
         }
 

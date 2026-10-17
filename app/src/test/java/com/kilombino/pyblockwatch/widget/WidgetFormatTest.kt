@@ -28,15 +28,4 @@ class WidgetFormatTest {
         assertEquals("Next in 1 block", WidgetFormat.nextLabel(1))
         assertEquals("Next (est.)", WidgetFormat.nextLabel(null))
     }
-
-    @Test fun compactChain() {
-        assertEquals(listOf("4.63", "5.09", "~5.93 G"),
-            WidgetFormat.difficultyChain(4625110531.0, 5086468190.0, 5929062650.0))
-        // Different prefixes: each value keeps its own.
-        assertEquals(listOf("980 M", "1.05 G", "~1.20 G"),
-            WidgetFormat.difficultyChain(980e6, 1.05e9, 1.2e9))
-        // Missing pieces (older server or no estimate yet).
-        assertEquals(listOf("5.09 G"), WidgetFormat.difficultyChain(null, 5086468190.0, null))
-        assertEquals(listOf("4.63", "5.09 G"), WidgetFormat.difficultyChain(4625110531.0, 5086468190.0, null))
-    }
 }

@@ -36,6 +36,8 @@ data class MarketData(
     val difficulty: Double? = null,
     /** Difficulty of the previous period (just before the last retarget). */
     val difficultyPrev: Double? = null,
+    /** Change at the last retarget (previous period to now), in percent. */
+    val difficultyPrevChangePct: Double? = null,
     /** Estimated difficulty after the next retarget. */
     val difficultyNext: Double? = null,
     /** Estimated change at the next retarget, in percent. */
@@ -165,6 +167,7 @@ object MarketFeed {
             fetchedMs = fetchedMs,
             difficulty = o.num("difficulty")?.takeIf { it > 0 },
             difficultyPrev = o.num("difficultyPrev")?.takeIf { it > 0 },
+            difficultyPrevChangePct = o.num("difficultyPrevChangePct"),
             difficultyNext = o.num("difficultyNext")?.takeIf { it > 0 },
             difficultyChangePct = o.num("difficultyChangePct"),
             difficultyRemainingBlocks = o.num("difficultyRemainingBlocks")?.toLong(),

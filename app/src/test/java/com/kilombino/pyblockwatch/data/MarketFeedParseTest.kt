@@ -29,6 +29,7 @@ class MarketFeedParseTest {
         assertEquals(4625110531.247428, m.difficultyPrev!!, 1e-3)
         assertEquals(5930443510.5, m.difficultyNext!!, 1e-3)
         assertEquals(16.5924, m.difficultyChangePct!!, 1e-9)
+        assertEquals(9.975, m.difficultyPrevChangePct!!, 1e-9)
         assertEquals(66L, m.difficultyRemainingBlocks)
         assertEquals(1792268415816L, m.difficultyRetargetMs)
     }

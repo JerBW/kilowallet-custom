@@ -19,19 +19,6 @@ internal object WidgetFormat {
         }
     }
 
-    /**
-     * The compact row of the medium widget: previous → now → ~next, with the prefix written
-     * once at the end when all three share it ("4.63", "5.09", "~5.93 G"), else on each.
-     */
-    fun difficultyChain(prev: Double?, now: Double, next: Double?): List<String> {
-        val all = listOfNotNull(prev, now, next)
-        val shared = all.map { unit(it).second }.distinct().size == 1
-        return all.mapIndexed { i, d ->
-            val tilde = if (next != null && i == all.lastIndex) "~" else ""
-            tilde + if (shared && i != all.lastIndex) number(d, unit(d).first) else difficulty(d)
-        }
-    }
-
     /** A difficulty with a metric prefix: 5086468190 -> "5.09 G". */
     fun difficulty(d: Double): String {
         val (f, u) = unit(d)
