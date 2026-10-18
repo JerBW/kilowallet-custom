@@ -39,7 +39,18 @@ object Tor {
 
     fun start(ctx: Context) {
         if (bound || !available) return
+        writeTorrc(ctx.applicationContext)
         bound = ctx.applicationContext.bindService(Intent(ctx.applicationContext, TorService::class.java), conn, Context.BIND_AUTO_CREATE)
+    }
+
+    /** Tor's own log, kept for crash reports: Tor stops with abort() and says why only here. */
+    fun logFile(ctx: Context) = java.io.File(ctx.applicationContext.noBackupFilesDir, "tor.log")
+
+    /** Tor reads this torrc on start: its log goes to [logFile], cut back when it grows. */
+    private fun writeTorrc(app: Context) = runCatching {
+        val log = logFile(app)
+        if (log.length() > 256_000) log.writeText(log.readText().takeLast(32_000))
+        TorService.getTorrc(app).writeText("Log notice file ${log.path}\n")
     }
 
     fun stop(ctx: Context) {

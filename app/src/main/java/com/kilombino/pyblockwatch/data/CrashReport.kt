@@ -100,7 +100,14 @@ object CrashReport {
             // The path Lnd.dir uses, without touching the Lnd object (which loads the Go library).
             java.io.File(ctx.noBackupFilesDir, "lnd/logs/bitcoin/mainnet/lnd.log").readLines().takeLast(30)
         }.getOrDefault(emptyList())
-        return (listOf(head) + wanted + (if (stderr.size > 1) listOf("--- stderr of the crashed run") + stderr else emptyList()) + (if (lnd.isNotEmpty()) listOf("--- lnd.log, last lines") + lnd else emptyList()))
+        // Tor's log: tor aborts on a failed check without an abort message, saying why only there.
+        val tor = runCatching {
+            java.io.File(ctx.noBackupFilesDir, "tor.log").takeIf { it.lastModified() >= e.timestamp - 10 * 60_000 }
+                ?.readLines()?.takeLast(20).orEmpty()
+        }.getOrDefault(emptyList())
+        return (listOf(head) + wanted + (if (stderr.size > 1) listOf("--- stderr of the crashed run") + stderr else emptyList()) +
+            (if (tor.isNotEmpty()) listOf("--- tor.log, last lines") + tor else emptyList()) +
+            (if (lnd.isNotEmpty()) listOf("--- lnd.log, last lines") + lnd else emptyList()))
             .joinToString("\n").take(16_000)
     }
 
