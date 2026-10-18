@@ -1016,8 +1016,11 @@ private fun TelegramAlertsPanel(accent: Color, mine: List<com.kilombino.pyblockw
                     "step by step: someone joined or left, someone asks to close, your turn to sign, sent, confirmed, cancelled.",
                     style = MaterialTheme.typography.bodySmall)
                 Text("⚠ Privacy: to do it, the bot's server learns that your Telegram account is in those pools " +
-                    "(and Telegram sees the messages). It never learns which mixed output is yours, it talks to this " +
-                    "app over Tor, and it forgets each pool when it ends. If that is too much, leave this off: the " +
+                    "(and Telegram sees the messages). It never learns which mixed output is yours, it forgets each pool " +
+                    "when it ends, and it talks to this app " +
+                    (if (com.kilombino.pyblockwatch.chain.Tor.available) "over Tor only (an alert waits rather than go over the clear net). "
+                     else "over https from your IP: this phone has no Tor. ") +
+                    "If that is too much, leave this off: the " +
                     "app's own notifications already tell you everything.",
                     style = MaterialTheme.typography.bodySmall, color = Warn)
             }

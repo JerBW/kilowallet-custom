@@ -533,7 +533,7 @@ class PoolSession(private val env: Env, private val s: State) {
                 if (s.sigs.size == plan.coins.size) return maybeBroadcast(plan)
                 val txid = o.getString("txid")
                 if (txid != CoinjoinTx.txid(plan)) return
-                s.txid = txid; s.phase = Phase.BROADCAST; save()
+                s.txid = txid; s.phase = Phase.BROADCAST; s.phaseDeadline = env.now(); save()
                 // Another wallet sent it: the creator still tells the listing the round is done.
                 if (s.creator) announce()
                 env.event(Event.Broadcast(s.poolId, txid))
@@ -619,12 +619,13 @@ class PoolSession(private val env: Env, private val s: State) {
         if (s.sigs.size < plan.coins.size || s.txid != null) return
         val tx = CoinjoinTx.assemble(plan, s.sigs.mapValues { Hashes.hexToBytes(it.value) })
         val ok = runCatching { env.broadcast(tx.rawHex) }
-        // Another member may have broadcast it already: the same txid is just as good.
-        if (ok.isFailure && env.confirmations(tx.txid) == null) {
+        // Another member may have broadcast it already: the same txid is just as good. A
+        // conflict is not: another transaction spends one of the coins, so this one never will be.
+        if (ok.isFailure && runCatching { env.confirmations(tx.txid) }.getOrNull() == null) {
             val msg = ok.exceptionOrNull()?.message ?: "broadcast failed"
-            if (!msg.contains("already", true) && !msg.contains("txn-mempool-conflict", true)) return abort("broadcast failed: $msg")
+            if (!msg.contains("already", true)) return abort("broadcast failed: $msg")
         }
-        s.txid = tx.txid; s.phase = Phase.BROADCAST; save()
+        s.txid = tx.txid; s.phase = Phase.BROADCAST; s.phaseDeadline = env.now(); save()
         channel(JSONObject().put("type", "tx").put("txid", tx.txid))
         announce()
         env.event(Event.Broadcast(s.poolId, tx.txid))
@@ -731,8 +732,17 @@ class PoolSession(private val env: Env, private val s: State) {
                 Phase.CLOSING -> if (now > s.phaseDeadline + 60) abort("not everyone sent their output in time")
                 Phase.SIGNING -> if (now > s.phaseDeadline + 60) abort("not everyone signed in time")
                 Phase.BROADCAST -> s.txid?.let { txid ->
-                    val c = env.confirmations(txid)
+                    val c = runCatching { env.confirmations(txid) }.getOrNull()
                     if (c != null && c >= 1) { s.phase = Phase.CONFIRMED; save(); env.event(Event.Confirmed(s.poolId, txid)); stop() }
+                    else if (c == null) {
+                        // Never seen by the server half a day after it went out: a coin of the round
+                        // was spent elsewhere, so this transaction can't confirm. Let the round go
+                        // (its coins are free again) instead of waiting for good.
+                        if (s.phaseDeadline > 0 && now > s.phaseDeadline + BROADCAST_GIVE_UP) {
+                            s.phase = Phase.ABORTED; s.reason = "the transaction never appeared: a coin of the round was spent elsewhere"
+                            save(); env.event(Event.Aborted(s.poolId, s.reason)); stop()
+                        }
+                    } else s.phaseDeadline = now // seen (unconfirmed): wait for it, however long it takes
                 }
                 else -> {}
             }
@@ -744,6 +754,8 @@ class PoolSession(private val env: Env, private val s: State) {
     companion object {
         /** Reason of a round this wallet left on purpose: its card goes away by itself. */
         const val LEFT_BY_CHOICE = "you left this round"
+        /** Seconds a broadcast transaction may stay unseen before the round is given up. */
+        const val BROADCAST_GIVE_UP = 12 * 3600L
         /** Seconds a join request waits for the creator's answer. */
         const val JOIN_TIMEOUT = 5 * 60
         /** Seconds past a vote's deadline the others wait for the creator to close or reopen. */

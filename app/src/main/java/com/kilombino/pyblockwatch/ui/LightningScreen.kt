@@ -749,7 +749,13 @@ private fun BridgePay(accent: Color, invoice: String, sha: Lnd.PayReq, est: com.
                                     "aborted" -> "Not paid: the price moved against the bridge before it paid, so it gave your BTC back. Nothing was charged."
                                     "failed" -> "Not paid: the bridge could not pay the SHA-256 invoice (no route there, or the invoice was refused). Your BTC came back."
                                     "expired" -> "Not paid: the price expired before your payment reached the bridge. Nothing was charged."
-                                    else -> Lnd.payError(e) + " Nothing was charged."
+                                    // The bridge has the payment (or already paid with it): the app only lost sight of it.
+                                    "funded", "paying", "paid" -> "Your payment reached the bridge and is still being settled: it completes, or comes back, by itself. Don't pay again; see Payments."
+                                    "settled" -> "The bridge paid the invoice. This phone lost track of the end of it: see Payments."
+                                    // Never funded on the bridge's side: nothing left this node for it.
+                                    "quoted", "offered" -> Lnd.payError(e) + " Nothing was charged."
+                                    // The bridge can't say: the payment may still be on its way.
+                                    else -> Lnd.payError(e) + " If it is still on its way it completes or comes back by itself: check Payments before paying again."
                                 })
                             }
                             if (!B.proves(preimage, sha.hash)) throw IllegalStateException(
@@ -1050,12 +1056,15 @@ private fun DeleteEmptyNode(accent: Color, s: Lightning.Status.Running) {
     var closeNow by remember { mutableStateOf(false) }
     val activity = LocalContext.current as FragmentActivity
     val b = s.balances
-    val empty = s.channels.isEmpty() && s.pending.isEmpty() && b != null &&
+    // A channel still closing (waiting or force closed) holds sats only this node can sweep:
+    // a node made again from the words would not know it.
+    val empty = s.channels.isEmpty() && s.pending.isEmpty() && s.closing.isEmpty() && b != null &&
         b.onchainConfirmed == 0L && b.onchainUnconfirmed == 0L && b.channels == 0L && b.pendingOpen == 0L
     Panel(accent = accent) {
         SectionLabel("Delete this node", accent)
         Spacer(Modifier.height(6.dp))
         Explain(if (empty) "This node holds nothing. Delete it to move another phone's node in here (MIGRATE TO THIS PHONE, then shown with Lightning off)."
+                else if (s.closing.isNotEmpty()) "A channel is still closing: its sats can only be swept by this node. Wait until it is done (Closing channels above)."
                 else "Only an empty node can be deleted: close its channels and send its on-chain coins out (PAY → on-chain) first.")
         TextButton(enabled = empty, onClick = { ask = true }) { Text("DELETE THIS NODE", color = if (empty) Warn else TextFaint) }
     }
@@ -1071,7 +1080,12 @@ private fun DeleteEmptyNode(accent: Color, s: Lightning.Status.Running) {
         confirmButton = {
             TextButton(onClick = {
                 ask = false
-                scope.launch { withContext(Dispatchers.IO) { Lightning.deleteNode(ctx) }; closeNow = true }
+                scope.launch {
+                    // Asked again now, not from the last refresh.
+                    val stillClosing = withContext(Dispatchers.IO) { runCatching { Lnd.pendingClose().isNotEmpty() }.getOrDefault(true) }
+                    if (stillClosing) return@launch
+                    withContext(Dispatchers.IO) { Lightning.deleteNode(ctx) }; closeNow = true
+                }
             }) { Text("DELETE", color = Warn) }
         },
         dismissButton = { TextButton(onClick = { ask = false }) { Text("CANCEL") } })

@@ -48,6 +48,19 @@ object CrashReport {
         return Report(crash.timestamp, text)
     }
 
+    /**
+     * [text] with the places a server could be named blanked out: .onion names, URLs, IP
+     * addresses and host:port pairs ("<host>"). A report is shared by hand; it should show
+     * where the code failed, not which nodes this wallet talks to.
+     */
+    fun redact(text: String): String = text
+        .replace(Regex("[a-z2-7]{16,56}\\.onion", RegexOption.IGNORE_CASE), "<onion>")
+        .replace(Regex("\\b(?:https?|wss?|tcp|ssl)://[^\\s\"')]+", RegexOption.IGNORE_CASE), "<url>")
+        .replace(Regex("\\b\\d{1,3}(?:\\.\\d{1,3}){3}(?::\\d+)?\\b"), "<ip>")
+        .replace(Regex("\\[?[0-9a-f]{0,4}(?::[0-9a-f]{0,4}){2,7}\\]?(?::\\d+)?", RegexOption.IGNORE_CASE)) { m -> if (m.value.count { it == ':' } >= 3) "<ip>" else m.value }
+        // host:port, but not a source location such as Lnd.kt:479.
+        .replace(Regex("\\b[a-z0-9.-]+\\.(?!(?:kt|java|rs|go|c|cc|cpp|h|so)\\b)[a-z]{2,}:\\d{2,5}\\b", RegexOption.IGNORE_CASE), "<host>")
+
     /** The last report kept, for settings. */
     fun last(ctx: Context): String? = prefs(ctx).getString("crash_last", null)
 

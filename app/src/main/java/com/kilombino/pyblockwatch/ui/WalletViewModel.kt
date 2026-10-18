@@ -1269,9 +1269,28 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
                         client.connect()
                         val raw = client.transaction(txid)
                         val tx = com.kilombino.pyblockwatch.crypto.TxParse.parse(raw)
-                        val parentVsize = com.kilombino.pyblockwatch.crypto.TxParse.vsize(raw)
                         val prevs = tx.inputs.map { i -> i to com.kilombino.pyblockwatch.crypto.TxParse.parse(client.transaction(i.txid)).outputs[i.vout] }
                         val parentFee = prevs.sumOf { it.second.value } - tx.outputs.sumOf { it.value }
+                        // The txid covers the parent without its witness only: a server could pad the
+                        // witness and make this child pay for bytes that aren't there. So the witness is
+                        // counted from what each input's type needs (P2WPKH 108 WU, Taproot with the
+                        // unified sighash 67), and the served size is used only if smaller.
+                        val served = com.kilombino.pyblockwatch.crypto.TxParse.vsize(raw)
+                        val witnessWu = prevs.map { (_, o) ->
+                            val sc = o.scriptPubKey
+                            when {
+                                sc.size == 22 && sc[0] == 0.toByte() -> 108            // P2WPKH
+                                sc.size == 34 && sc[0] == 0x51.toByte() -> 67          // P2TR key path + 0x21
+                                sc.size == 23 && sc[0] == 0xa9.toByte() -> 108         // P2SH-P2WPKH (the usual case)
+                                sc.size == 25 && sc[0] == 0x76.toByte() -> 0           // P2PKH: no witness
+                                else -> -1                                              // can't tell
+                            }
+                        }
+                        val parentVsize = if (witnessWu.any { it < 0 }) served else {
+                            val base = com.kilombino.pyblockwatch.crypto.TxParse.baseSize(raw)
+                            val wu = base * 4 + witnessWu.sum() + if (witnessWu.any { it > 0 }) 2 else 0
+                            minOf(served, (wu + 3) / 4)
+                        }
                         // The child pays for its parent only: if the parent spends coins that are
                         // themselves unconfirmed, miners weigh those too and the package rate shown
                         // would be too high. Speed up the oldest one first.

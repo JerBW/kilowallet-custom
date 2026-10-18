@@ -374,8 +374,9 @@ object CoinjoinHub {
             is PoolSession.Event.CloseRefused -> CoinjoinAlerts.event(ctx, st.poolId, "close_refused", vote)
             is PoolSession.Event.SignNeeded -> CoinjoinAlerts.event(ctx, st.poolId, "sign_needed")
             is PoolSession.Event.Confirmed -> CoinjoinAlerts.event(ctx, st.poolId, "confirmed")
+            // No free text: an abort reason can be another member's own words.
             is PoolSession.Event.Aborted -> CoinjoinAlerts.event(ctx, st.poolId,
-                if (e.reason == PoolSession.LEFT_BY_CHOICE) "left" else "aborted", e.reason)
+                if (e.reason == PoolSession.LEFT_BY_CHOICE) "left" else "aborted")
             else -> {}
         }
     }

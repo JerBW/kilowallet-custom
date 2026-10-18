@@ -30,6 +30,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -251,14 +252,24 @@ class MainActivity : FragmentActivity() {
                         AlertDialog(
                             onDismissRequest = {},
                             title = { Text("Kilowallet closed unexpectedly") },
-                            text = { Text("The last time, the app closed on an error. The report says where in the code it " +
-                                "failed, the app version and the phone model; no words, keys or addresses. Share it with the " +
-                                "developer to get it fixed? Nothing is sent unless you do.", style = MaterialTheme.typography.bodySmall) },
+                            text = {
+                                Column {
+                                    Text("The last time, the app closed on an error. The report says where in the code it " +
+                                        "failed, the app version and the phone model; no words, keys or addresses, and server names are " +
+                                        "blanked out. Read it below. Share it with the developer to get it fixed? Nothing is sent unless you do.",
+                                        style = MaterialTheme.typography.bodySmall)
+                                    Spacer(Modifier.height(8.dp))
+                                    // The exact text that would be shared.
+                                    Text(com.kilombino.pyblockwatch.data.CrashReport.redact(report),
+                                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace),
+                                        modifier = Modifier.heightIn(max = 220.dp).verticalScroll(rememberScrollState()))
+                                }
+                            },
                             confirmButton = { TextButton(onClick = {
                                 val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
                                     type = "text/plain"
                                     putExtra(android.content.Intent.EXTRA_SUBJECT, "Kilowallet crash report")
-                                    putExtra(android.content.Intent.EXTRA_TEXT, report)
+                                    putExtra(android.content.Intent.EXTRA_TEXT, com.kilombino.pyblockwatch.data.CrashReport.redact(report))
                                 }
                                 runCatching { startActivity(android.content.Intent.createChooser(send, "Share the crash report")) }
                                 com.kilombino.pyblockwatch.data.CrashLog.clear(this@MainActivity); crash = null
@@ -1276,7 +1287,7 @@ internal fun SettingsPanel(
                 TextButton(onClick = { crashScope.launch {
                     val fresh = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                         runCatching { com.kilombino.pyblockwatch.data.CrashReport.latest(activity) }.getOrNull() } ?: report
-                    clip.setText(androidx.compose.ui.text.AnnotatedString(fresh))
+                    clip.setText(androidx.compose.ui.text.AnnotatedString(com.kilombino.pyblockwatch.data.CrashReport.redact(fresh)))
                     android.widget.Toast.makeText(activity, com.kilombino.pyblockwatch.ui.i18n.I18n.tr("Crash report copied"), android.widget.Toast.LENGTH_SHORT).show()
                 } }) {
                     Text("COPY THE LAST CRASH REPORT", color = accent, style = MaterialTheme.typography.bodySmall)

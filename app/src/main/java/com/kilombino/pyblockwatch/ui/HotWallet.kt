@@ -65,6 +65,8 @@ import java.security.SecureRandom
  */
 @Composable
 fun DiceScreen(vm: WalletViewModel, onBack: () -> Unit) {
+    // The rolls are the seed (SHA-256 of them): no screenshots, recordings or recents thumbnail.
+    SecureWhileShown()
     val activity = LocalContext.current as FragmentActivity
     var strength by remember { mutableStateOf(256) }          // 24 words by default
     var rolls by remember { mutableStateOf("") }
