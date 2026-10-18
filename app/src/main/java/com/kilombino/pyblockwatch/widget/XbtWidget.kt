@@ -148,10 +148,31 @@ class XbtWidget : AppWidgetProvider() {
                 Size.FULL -> R.layout.widget_full
                 Size.LARGE -> R.layout.widget_large
             })
-            // Tapping the widget opens the wallet; the round arrow asks for fresh data.
+            // Tapping the widget elsewhere opens the wallet; the round arrow asks for fresh data.
             v.setOnClickPendingIntent(R.id.root, PendingIntent.getActivity(
                 ctx, 0, Intent(ctx, MainActivity::class.java),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
+            // Each figure opens where it can be checked: the exchange for prices, the explorer
+            // for the chain, the rental market for hashrate prices.
+            val trade = "https://neoxa.exchange/trade/"
+            val explorer = "https://${MarketFeed.SOURCE}"
+            fun link(id: Int, url: String) = v.setOnClickPendingIntent(id, PendingIntent.getActivity(
+                ctx, 100 + id % 1000, Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
+            link(R.id.price, trade + "BTCB2_USDC"); link(R.id.change, trade + "BTCB2_USDC")
+            if (size != Size.SMALL) {
+                link(R.id.range, trade + "BTCB2_USDC")
+                link(R.id.poolsats, trade + "BTCB2_BTC"); link(R.id.poolsats_change, trade + "BTCB2_BTC")
+                link(R.id.hashrate, "$explorer/graphs/mining/hashrate-difficulty")
+                link(R.id.diff_row, "$explorer/graphs/mining/hashrate-difficulty")
+                link(R.id.block, m?.height?.let { "$explorer/block/$it" } ?: explorer)
+            }
+            if (size == Size.LARGE) {
+                link(R.id.diff_next_row, "$explorer/graphs/mining/hashrate-difficulty")
+                link(R.id.earns, "$explorer/mining"); link(R.id.kwh, "$explorer/mining"); link(R.id.ysh, "$explorer/mining")
+                link(R.id.chain, explorer)
+                link(R.id.rent, "https://www.miningrigrentals.com/rigs/blake2b")
+            }
             if (size == Size.LARGE) v.setOnClickPendingIntent(R.id.convert, PendingIntent.getActivity(
                 ctx, 2, Intent(ctx, com.kilombino.pyblockwatch.ui.ConverterActivity::class.java)
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK),

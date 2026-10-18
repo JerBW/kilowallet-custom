@@ -366,23 +366,7 @@ private fun SeedBackup(
     }
     Spacer(Modifier.height(10.dp))
     Panel(accent = Purple) {
-        SelectionContainer {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                words.chunked(2).forEachIndexed { rowIdx, pair ->
-                    Row(Modifier.fillMaxWidth()) {
-                        pair.forEachIndexed { colIdx, w ->
-                            val n = rowIdx * 2 + colIdx + 1
-                            Text(
-                                "$n. $w",
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontFamily = FontFamily.Monospace, color = TextMain,
-                                modifier = Modifier.weight(1f),
-                            )
-                        }
-                    }
-                }
-            }
-        }
+        SelectionContainer { WordColumns(words) }
     }
     Spacer(Modifier.height(12.dp))
     PassphraseFields(words, passphrase, { passphrase = it }, repeat, { repeat = it })
