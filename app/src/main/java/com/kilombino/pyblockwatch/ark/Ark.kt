@@ -372,6 +372,25 @@ object Ark {
         call("POST", "/boards/board-all", req, 180_000)
     }
 
+    /**
+     * Network fee of a move into Ark funded by exactly [coins] (coin control), at [rate] sat/vB:
+     * [sats] into Ark with change back to the deposit, or all of them when null. Exact: the
+     * engine builds the funding transaction without signing it.
+     */
+    fun estimateBoardCoinsFee(coins: List<String>, sats: Long?, rate: Double): Long {
+        val req = JSONObject().put("outpoints", ids(coins)).put("fee_rate_sat_per_vb", rate)
+        if (sats != null) req.put("amount_sat", sats)
+        return JSONObject(call("POST", "/boards/board-selected/estimate", req)).getLong("fee_sat")
+    }
+
+    /** Moves [sats] (null: all) of exactly [coins] into Ark, the funding transaction at [rate] sat/vB. */
+    fun boardCoins(coins: List<String>, sats: Long?, rate: Double?) {
+        val req = JSONObject().put("outpoints", ids(coins))
+        if (sats != null) req.put("amount_sat", sats)
+        if (rate != null) req.put("fee_rate_sat_per_vb", rate)
+        call("POST", "/boards/board-selected", req, 180_000)
+    }
+
     /** The chain source's current fee rates in sat/vB: fast (~1 block), regular (~3), slow (~6). */
     data class FeeRates(val fast: Long, val regular: Long, val slow: Long)
 

@@ -280,9 +280,15 @@ private fun ArkScreenBody(vm: WalletViewModel, accent: Color, pull: Int) {
                     }
                     sheet = null
                 }
-                "board" -> ArkBoardSheet(balance, accent) { sats, rate ->
+                "board" -> ArkBoardSheet(balance, accent) { sats, rate, coins ->
                     secured("Move into Ark", "Moving funds into Ark…") {
-                        withContext(Dispatchers.IO) { if (sats == null) Ark.boardAll(rate) else Ark.board(sats, rate) }
+                        withContext(Dispatchers.IO) {
+                            when {
+                                coins != null -> Ark.boardCoins(coins, sats, rate)
+                                sats == null -> Ark.boardAll(rate)
+                                else -> Ark.board(sats, rate)
+                            }
+                        }
                         "Moving into Ark. It becomes spendable after ${Ark.BOARD_CONFIRMATIONS} confirmations."
                     }
                     sheet = null
@@ -683,9 +689,15 @@ private fun CostBreakdown(e: Ark.Estimate, amountLabel: String, totalLabel: Stri
 }
 
 @Composable
-private fun ArkBoardSheet(b: Ark.Balance?, accent: Color, onBoard: (Long?, Double?) -> Unit) {
+private fun ArkBoardSheet(b: Ark.Balance?, accent: Color, onBoard: (Long?, Double?, List<String>?) -> Unit) {
     var amount by remember { mutableStateOf("") }
-    val available = (b?.onchainConfirmed ?: 0)
+    val scope = rememberCoroutineScope()
+    // Coin control: the deposit's coins to fund the move with, ticked by hand.
+    var choose by remember { mutableStateOf(false) }
+    var coins by remember { mutableStateOf<List<Ark.Coin>>(emptyList()) }
+    var picked by remember { mutableStateOf<Set<String>>(emptySet()) }
+    val chosen = if (choose) picked.toList() else null
+    val available = if (chosen != null) coins.filter { it.id in picked }.sumOf { it.amount } else (b?.onchainConfirmed ?: 0)
     // Network fee of the funding transaction: the wallet's estimate, or one chosen here.
     var rates by remember { mutableStateOf<Ark.FeeRates?>(null) }
     var rateText by remember { mutableStateOf("") }
@@ -700,6 +712,15 @@ private fun ArkBoardSheet(b: Ark.Balance?, accent: Color, onBoard: (Long?, Doubl
         Spacer(Modifier.height(6.dp))
         Explain("Moves confirmed XBT from this wallet's deposit address into Ark. Minimum " +
             "${groupSats(Ark.MIN_BOARD_SAT)} sats; spendable after ${Ark.BOARD_CONFIRMATIONS} confirmations. Available: ${groupSats(available)} sats.")
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable {
+            choose = !choose; picked = emptySet()
+            if (choose) scope.launch { coins = withContext(Dispatchers.IO) { Ark.depositCoins() } }
+        }) {
+            Text(if (choose) "☑" else "☐", color = accent, style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.width(8.dp))
+            Text("Choose coins", style = MaterialTheme.typography.bodySmall, color = TextSoft)
+        }
+        if (choose) CoinPicker(coins, picked, accent) { id -> picked = if (id in picked) picked - id else picked + id }
         OutlinedTextField(value = amount, onValueChange = { amount = it.filter(Char::isDigit) },
             label = { Text("sats (empty = everything)") }, singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
@@ -727,8 +748,10 @@ private fun ArkBoardSheet(b: Ark.Balance?, accent: Color, onBoard: (Long?, Doubl
         val sats = amount.toLongOrNull()
         var est by remember { mutableStateOf<Ark.Estimate?>(null) }
         var netFee by remember { mutableStateOf<Long?>(null) }
-        LaunchedEffect(sats, available, rate) {
-            netFee = if (rateOk) withContext(Dispatchers.IO) { runCatching { Ark.estimateBoardNetworkFee(rate!!, sats == null) }.getOrNull() } else null
+        LaunchedEffect(sats, available, rate, picked, choose) {
+            netFee = if (!rateOk) null
+                else if (chosen != null) { if (chosen.isEmpty()) null else withContext(Dispatchers.IO) { runCatching { Ark.estimateBoardCoinsFee(chosen, sats, rate!!) }.getOrNull() } }
+                else withContext(Dispatchers.IO) { runCatching { Ark.estimateBoardNetworkFee(rate!!, sats == null) }.getOrNull() }
             // Moving everything: the network fee comes out of the deposit first.
             val target = sats ?: (available - (netFee ?: 0))
             est = if (target >= Ark.MIN_BOARD_SAT) withContext(Dispatchers.IO) { runCatching { Ark.estimateBoard(target) }.getOrNull() } else null
@@ -749,8 +772,9 @@ private fun ArkBoardSheet(b: Ark.Balance?, accent: Color, onBoard: (Long?, Doubl
         var boardFeeOk by remember(rate) { mutableStateOf(false) }
         if (highRate) FeeGate("This fee is high: $rateText sat/vB.", boardFeeOk) { boardFeeOk = !boardFeeOk }
         Button(
-            enabled = available >= Ark.MIN_BOARD_SAT && (sats == null || sats >= Ark.MIN_BOARD_SAT) && rateOk && (!highRate || boardFeeOk),
-            onClick = { onBoard(sats, rate) },
+            enabled = available >= Ark.MIN_BOARD_SAT && (sats == null || sats >= Ark.MIN_BOARD_SAT) && rateOk && (!highRate || boardFeeOk) &&
+                (chosen == null || (chosen.isNotEmpty() && netFee != null)),
+            onClick = { onBoard(sats, rate, chosen) },
             colors = ButtonDefaults.buttonColors(containerColor = accent, contentColor = Ink),
             shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth(),
         ) { Text("MOVE INTO ARK", style = MaterialTheme.typography.titleMedium) }
