@@ -555,7 +555,22 @@ object Ark {
                 String.format(java.util.Locale.US, "%.1f", rate) + " sat/vB), no Ark reserves.", problem)
     }.getOrNull()
 
-    fun sendFromDeposit(dest: String, sats: Long?): String {
+    /**
+     * The engine carries no cap for these (only Ark payments have max_total_sat): ask for the
+     * cost again right before acting and refuse if it grew past what the user approved, with a
+     * little slack for an on-chain fee rate that moved meanwhile.
+     */
+    private fun recheck(maxTotal: Long?, now: () -> Estimate?) {
+        if (maxTotal == null) return
+        val e = now() ?: error("Could not confirm the cost right before sending; nothing was sent.")
+        require(e.problem == null) { e.problem ?: "" }
+        require(e.total <= maxTotal + maxOf(20L, maxTotal / 100)) {
+            "The cost went up since you reviewed it (${e.total} sats instead of at most $maxTotal); nothing was sent."
+        }
+    }
+
+    fun sendFromDeposit(dest: String, sats: Long?, maxTotal: Long? = null): String {
+        recheck(maxTotal) { estimateDepositSend(dest, sats) }
         val d = dest.trim()
         val r = if (sats == null) JSONObject(call("POST", "/onchain/drain", JSONObject().put("destination", d), 120_000))
         else JSONObject(call("POST", "/onchain/send", JSONObject().put("destination", d).put("amount_sat", sats), 120_000))
@@ -748,7 +763,8 @@ object Ark {
                 (if (change > 0) "; ${change} sats of change back to the deposit." else "."))
     }.getOrElse { e -> if (e is ArkError) Estimate(0, 0, 0, false, "", e.message) else null }
 
-    fun sendDepositCoins(dest: String, sats: Long?, coins: List<String>): String {
+    fun sendDepositCoins(dest: String, sats: Long?, coins: List<String>, maxTotal: Long? = null): String {
+        recheck(maxTotal) { estimateDepositCoins(dest, sats, coins) }
         val req = JSONObject().put("destination", dest.trim()).put("outpoints", ids(coins))
         if (sats != null) req.put("amount_sat", sats)
         val r = JSONObject(call("POST", "/onchain/send-selected", req, 120_000))
@@ -762,7 +778,8 @@ object Ark {
             "${coins.size} chosen Ark coin" + (if (coins.size == 1) "" else "s") + " leave Ark whole in the next round.")
     }.getOrElse { e -> if (e is ArkError) Estimate(0, 0, 0, false, "", e.message) else null }
 
-    fun withdrawCoins(dest: String, coins: List<String>): String {
+    fun withdrawCoins(dest: String, coins: List<String>, maxTotal: Long? = null): String {
+        recheck(maxTotal) { estimateWithdrawCoins(dest, coins) }
         call("POST", "/wallet/offboard/vtxos", JSONObject().put("address", dest.trim()).put("vtxos", ids(coins)), 180_000)
         return "Withdrawal requested: the chosen coins leave Ark in the next round."
     }

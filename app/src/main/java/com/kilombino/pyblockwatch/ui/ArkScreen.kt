@@ -253,11 +253,11 @@ private fun ArkScreenBody(vm: WalletViewModel, accent: Color, pull: Int) {
                         askSave = dest
                         val result = withContext(Dispatchers.IO) {
                             when {
-                                coins.isNotEmpty() && fromDeposit -> Ark.sendDepositCoins(dest, sats, coins)
+                                coins.isNotEmpty() && fromDeposit -> Ark.sendDepositCoins(dest, sats, coins, approved)
                                 coins.isNotEmpty() && dest.startsWith("ark1", true) && sats != null && approved != null ->
                                     Ark.sendArkCoins(dest, sats, approved, coins)
-                                coins.isNotEmpty() -> Ark.withdrawCoins(dest, coins)
-                                fromDeposit -> Ark.sendFromDeposit(dest, sats)
+                                coins.isNotEmpty() -> Ark.withdrawCoins(dest, coins, approved)
+                                fromDeposit -> Ark.sendFromDeposit(dest, sats, approved)
                                 else -> Ark.send(dest, sats, approved)
                             }
                         }.ifBlank { "Sent." }
@@ -604,7 +604,14 @@ private fun ArkSendSheet(accent: Color, deposit: Long, onSend: (String, Long?, L
             if (r.problem == null) CostBreakdown(r, "They receive", "You pay in total", accent)
             Spacer(Modifier.height(8.dp))
             r.problem?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = Warn) }
+            // A cost that looks like a slip needs a second yes, as the wallet's own sends do.
+            val fee = (r.total - r.amount).coerceAtLeast(0)
+            val concern = if (r.problem == null && (fee > 100_000 || (r.amount > 0 && fee * 100 > r.amount * 5)))
+                "This fee is high: ${groupSats(fee)} sats." else null
+            var feeOk by remember(r) { mutableStateOf(false) }
+            concern?.let { FeeGate(it, feeOk) { feeOk = !feeOk } }
             if (r.problem == null) Button(
+                enabled = concern == null || feeOk,
                 onClick = { onSend(dest, amount.toLongOrNull(), r.total, fromDeposit, if (choose) picked.toList() else emptyList()) },
                 colors = ButtonDefaults.buttonColors(containerColor = accent, contentColor = Ink),
                 shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth(),
@@ -720,8 +727,11 @@ private fun ArkBoardSheet(b: Ark.Balance?, accent: Color, onBoard: (Long?, Doubl
                 style = MaterialTheme.typography.bodySmall, color = TextSoft)
             Spacer(Modifier.height(8.dp))
         }
+        val highRate = (rate ?: 0.0) > 100
+        var boardFeeOk by remember(rate) { mutableStateOf(false) }
+        if (highRate) FeeGate("This fee is high: $rateText sat/vB.", boardFeeOk) { boardFeeOk = !boardFeeOk }
         Button(
-            enabled = available >= Ark.MIN_BOARD_SAT && (sats == null || sats >= Ark.MIN_BOARD_SAT) && rateOk,
+            enabled = available >= Ark.MIN_BOARD_SAT && (sats == null || sats >= Ark.MIN_BOARD_SAT) && rateOk && (!highRate || boardFeeOk),
             onClick = { onBoard(sats, rate) },
             colors = ButtonDefaults.buttonColors(containerColor = accent, contentColor = Ink),
             shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth(),
