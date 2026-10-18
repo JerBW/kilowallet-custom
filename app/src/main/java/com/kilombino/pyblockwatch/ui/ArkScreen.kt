@@ -358,8 +358,11 @@ private fun ArkBalancePanel(b: Ark.Balance?, expiry: Int?, boardConfs: Int?, acc
 private fun PocketRow(label: String, sats: Long, note: String, color: Color) {
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
         Text(label, style = MaterialTheme.typography.bodySmall, color = TextSoft, modifier = Modifier.width(130.dp))
-        Text(street(groupSats(sats) + " sats"), style = MaterialTheme.typography.bodyMedium, color = color, modifier = Modifier.weight(1f))
-        Text(note, style = MaterialTheme.typography.bodySmall, color = TextFaint)
+        // The amount never wraps; a long note does, on the right, instead of squeezing it.
+        Text(street(groupSats(sats) + " sats"), style = MaterialTheme.typography.bodyMedium, color = color, maxLines = 1, softWrap = false)
+        Spacer(Modifier.width(8.dp))
+        Text(note, style = MaterialTheme.typography.bodySmall, color = TextFaint, modifier = Modifier.weight(1f),
+            textAlign = androidx.compose.ui.text.style.TextAlign.End)
     }
 }
 
@@ -748,6 +751,8 @@ private fun ArkHistory(items: List<Ark.Movement>, accent: Color, explorer: Strin
     if (spendable != null) {
         var run = spendable
         for (m in items) {
+            // The deposit's own on-chain transactions don't touch the Ark balance.
+            if (m.kind == "deposit received" || m.kind == "sent from deposit") continue
             after[m.id] = run
             val st = m.status.lowercase()
             val effect = when {
