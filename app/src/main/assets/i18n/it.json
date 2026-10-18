@@ -1970,5 +1970,8 @@
 "Resize sent. It locks after its confirmations; the channel keeps working.": "Ridimensionamento inviato. Diventa effettivo dopo le sue conferme; il canale continua a funzionare.",
 "The resize failed": "Il ridimensionamento è fallito",
 "RESIZING…": "RIDIMENSIONO…",
-"TAKE OUT": "TOGLI"
+"TAKE OUT": "TOGLI",
+"Speed up the transaction": "Accelera la transazione",
+"The node has no unconfirmed coin from this transaction to speed it up with: it gave no change back to the node, or it already confirmed.": "Il nodo non ha monete non confermate da questa transazione con cui accelerarla: non gli ha restituito resto, oppure è già confermata.",
+"The node spends its {0} sats of change from it with a second transaction whose fee pays for both, so miners take the two together.": "Il nodo spende i suoi {0} sats di resto con una seconda transazione la cui commissione paga per entrambe, così i miner le prendono insieme."
 }

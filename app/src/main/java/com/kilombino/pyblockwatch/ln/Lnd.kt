@@ -235,13 +235,13 @@ object Lnd {
     /** A splice in progress (lnrpc.PendingSplice). */
     data class Splice(
         val state: String, val localDelta: Long, val txid: String, val confirmations: Int, val lockDepth: Int,
-        val dead: Boolean, val relayStatus: String, val newCapacity: Long,
+        val dead: Boolean, val relayStatus: String, val newCapacity: Long, val fee: Long = 0,
     )
 
     suspend fun channels(): List<Channel> =
         call { Lndmobile.listChannels(Pb().bool(6, true).build(), it) }.msgs(11).map {
             val sp = if (it.has(1003)) it.msg(1003).let { p ->
-                Splice(p.string(2), p.long(3), p.string(8), p.int(10), p.int(11), p.bool(14), p.string(15), p.long(18))
+                Splice(p.string(2), p.long(3), p.string(8), p.int(10), p.int(11), p.bool(14), p.string(15), p.long(18), p.long(5))
             } else null
             Channel(it.bool(1), it.string(2), it.string(3), it.long(5), it.long(6), it.long(7), it.string(34), it.long(4),
                 it.string(1002), sp)
@@ -332,6 +332,27 @@ object Lnd {
         val parent = TxSize.of(raw)
         val parentFee = capacity - parent.outputs
         if (parentFee <= 0 || parentFee > capacity / 2) throw LndError("could not work out the close's fee")
+        val childRate = cpfpChildRate(targetRate, parent.vsize, parentFee, CPFP_CHILD_VSIZE)
+        val budget = childRate * CPFP_CHILD_VSIZE + 20
+        if (budget >= coin.sats / 2) throw LndError("that fee would take too much of the coin")
+        val out = Pb().bytes(1, txid.chunked(2).map { it.toInt(16).toByte() }.toByteArray().reversedArray()).int(3, coin.index)
+        call { Lndmobile.walletKitBumpFee(Pb().msg(1, out).int(5, childRate).bool(6, true).int(7, budget).build(), it) }
+        return childRate
+    }
+
+    /**
+     * Speeds up any unconfirmed transaction of the node that pays it change (a channel opening,
+     * an on-chain payment, a resize), the same way: a child spending the node's output of it whose
+     * fee lifts the two to [targetRate] sat/vB. [knownFee] is the parent's fee when the wallet
+     * can't tell it (a resize spends the channel's output too); otherwise the wallet's record.
+     */
+    suspend fun speedUpTx(txid: String, targetRate: Long, knownFee: Long? = null): Long {
+        val coin = unconfirmedCoinOf(txid) ?: throw LndError("the node has no unconfirmed coin from this transaction (no change, or already confirmed)")
+        val tx = call { Lndmobile.getTransactions(Pb().int(1, 0).int(2, -1).build(), it) }.msgs(1)
+            .firstOrNull { it.string(1) == txid } ?: throw LndError("the node does not know this transaction")
+        val parent = TxSize.of(tx.string(9))
+        val parentFee = knownFee ?: tx.long(7)
+        if (parentFee <= 0) throw LndError("could not work out the transaction's fee")
         val childRate = cpfpChildRate(targetRate, parent.vsize, parentFee, CPFP_CHILD_VSIZE)
         val budget = childRate * CPFP_CHILD_VSIZE + 20
         if (budget >= coin.sats / 2) throw LndError("that fee would take too much of the coin")

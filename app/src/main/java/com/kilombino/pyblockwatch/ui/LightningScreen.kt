@@ -210,9 +210,11 @@ private fun LnNode(s: Lightning.Status.Running, accent: Color, settings: Boolean
     var selected by remember { mutableStateOf<Set<String>>(emptySet()) }
     var showTx by remember { mutableStateOf<Pair<String, String>?>(null) }
     closing?.let { cs -> CloseChannelDialog(cs, accent, vm, onTx = { showTx = "Closing transaction" to it }) { closing = null; selecting = false; selected = emptySet() } }
-    showTx?.let { (t, id) -> TxDialog(t, id, accent, vm) { showTx = null } }
+    showTx?.let { (t, id) -> TxDialog(t, id, accent, vm, onSpeedUp = { bumping = id to null; showTx = null }) { showTx = null } }
     var speeding by remember { mutableStateOf<Lnd.Closing?>(null) }
     speeding?.let { c -> SpeedUpCloseDialog(c, accent) { speeding = null } }
+    var bumping by remember { mutableStateOf<Pair<String, Long?>?>(null) }
+    bumping?.let { (txid, fee) -> SpeedUpTxDialog(txid, fee, accent) { bumping = null } }
     var resizing by remember { mutableStateOf<Lnd.Channel?>(null) }
     resizing?.let { c -> ResizeChannelDialog(c, accent, vm, onTx = { showTx = "Resize transaction" to it }) { resizing = null } }
     val book = remember(s) { ledger(s) }
@@ -294,6 +296,17 @@ private fun LnNode(s: Lightning.Status.Running, accent: Color, settings: Boolean
             Text(p.peer.take(16) + "…  " + street(groupSats(p.capacity)) + " sats", style = MaterialTheme.typography.bodySmall, color = TextMain)
             Text("opening" + (if (p.confirmationsLeft > 0) " · ${p.confirmationsLeft} confirmations left" else " · waiting for the first confirmation"),
                 style = MaterialTheme.typography.bodySmall, color = Warn)
+            Row {
+                TextButton(onClick = { showTx = "Funding transaction" to p.point.substringBefore(':') },
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)) {
+                    Text("VIEW FUNDING TX", color = accent, style = MaterialTheme.typography.labelSmall)
+                }
+                Spacer(Modifier.width(16.dp))
+                TextButton(onClick = { bumping = p.point.substringBefore(':') to null },
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)) {
+                    Text("SPEED UP", color = accent, style = MaterialTheme.typography.labelSmall)
+                }
+            }
         }
         s.channels.forEach { c ->
             Spacer(Modifier.height(6.dp))
@@ -335,6 +348,13 @@ private fun LnNode(s: Lightning.Status.Running, accent: Color, settings: Boolean
                         Text("VIEW RESIZE TX", color = accent, style = MaterialTheme.typography.labelSmall)
                     }
                     Spacer(Modifier.width(16.dp))
+                    if (c.splice.confirmations == 0 && !c.splice.dead) {
+                        TextButton(onClick = { bumping = c.splice.txid to c.splice.fee.takeIf { it > 0 } },
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)) {
+                            Text("SPEED UP", color = accent, style = MaterialTheme.typography.labelSmall)
+                        }
+                        Spacer(Modifier.width(16.dp))
+                    }
                 }
                 TextButton(onClick = { closing = listOf(c) }, contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)) {
                     Text("CLOSE CHANNEL", color = accent, style = MaterialTheme.typography.labelSmall)
@@ -1556,9 +1576,61 @@ private fun SpeedUpCloseDialog(c: Lnd.Closing, accent: Color, onDone: () -> Unit
         dismissButton = { if (msg?.second != true && coin != null) TextButton(enabled = !busy, onClick = onDone) { Text("CANCEL") } })
 }
 
-/** A transaction of the node: its id to copy, and the explorer to look at it. */
+/**
+ * SPEED UP for a transaction of the node that pays it change (opening, on-chain payment, resize):
+ * a child (CPFP) from the node's output of it, so the two confirm together at the rate chosen.
+ */
 @Composable
-private fun TxDialog(title: String, txid: String, accent: Color, vm: WalletViewModel, onDone: () -> Unit) {
+private fun SpeedUpTxDialog(txid: String, knownFee: Long?, accent: Color, onDone: () -> Unit) {
+    val scope = rememberCoroutineScope()
+    var coin by remember { mutableStateOf<Lnd.CloseCoin?>(null) }
+    var looked by remember { mutableStateOf(false) }
+    LaunchedEffect(txid) {
+        coin = withContext(Dispatchers.IO) { runCatching { Lnd.unconfirmedCoinOf(txid) }.getOrNull() }
+        looked = true
+    }
+    var fee by remember { mutableStateOf("3") }
+    val rate = fee.toLongOrNull() ?: 0
+    var feeOk by remember { mutableStateOf(false) }
+    var busy by remember { mutableStateOf(false) }
+    var msg by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
+    AlertDialog(onDismissRequest = { if (!busy) onDone() },
+        title = { Text("Speed up the transaction") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                when {
+                    !looked -> Text("Looking for the node's coin in it…", style = MaterialTheme.typography.bodySmall)
+                    coin == null -> Text("The node has no unconfirmed coin from this transaction to speed it up with: it gave no change " +
+                        "back to the node, or it already confirmed.", style = MaterialTheme.typography.bodySmall)
+                    else -> {
+                        Text("The node spends its " + groupSats(coin!!.sats) + " sats of change from it with a second transaction " +
+                            "whose fee pays for both, so miners take the two together.", style = MaterialTheme.typography.bodySmall)
+                        OutlinedTextField(fee, { fee = it.filter(Char::isDigit) }, label = { Text("Fee rate for both together (sat/vB)") }, singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
+                        if (rate > HIGH_FEE_RATE) FeeGate("This fee is high: $rate sat/vB.", feeOk) { feeOk = !feeOk }
+                    }
+                }
+                msg?.let { (t, ok) -> Text(t, color = if (ok) Good else Bad, style = MaterialTheme.typography.bodySmall) }
+            }
+        },
+        confirmButton = {
+            if (msg?.second == true || (looked && coin == null)) TextButton(onClick = onDone) { Text("OK", color = accent) }
+            else TextButton(enabled = !busy && coin != null && rate >= 1 && (rate <= HIGH_FEE_RATE || feeOk), onClick = {
+                busy = true; msg = null
+                scope.launch {
+                    runCatching { withContext(Dispatchers.IO) { Lnd.speedUpTx(txid, rate, knownFee) } }
+                        .onSuccess { child -> msg = "Sent: the second transaction pays $child sat/vB, both together about $rate." to true; Lightning.refresh() }
+                        .onFailure { msg = (it.message ?: "could not speed it up") to false }
+                    busy = false
+                }
+            }) { Text(if (busy) "SENDING…" else "SPEED UP", color = accent) }
+        },
+        dismissButton = { if (msg?.second != true && coin != null) TextButton(enabled = !busy, onClick = onDone) { Text("CANCEL") } })
+}
+
+/** A transaction of the node: its id to copy, the explorer to look at it, and SPEED UP while it waits. */
+@Composable
+private fun TxDialog(title: String, txid: String, accent: Color, vm: WalletViewModel, onSpeedUp: (() -> Unit)? = null, onDone: () -> Unit) {
     val clip = LocalClipboardManager.current
     val uri = androidx.compose.ui.platform.LocalUriHandler.current
     val explorer = vm.explorerFor(com.kilombino.pyblockwatch.chain.Chain.BLAKE2B)
@@ -1578,6 +1650,8 @@ private fun TxDialog(title: String, txid: String, accent: Color, vm: WalletViewM
         dismissButton = {
             Row {
                 TextButton(onClick = { clip.setText(AnnotatedString(txid)) }) { Text("COPY", color = accent) }
+                // A closing transaction has its own SPEED UP (it knows the channel's capacity).
+                if (onSpeedUp != null && title != "Closing transaction") TextButton(onClick = onSpeedUp) { Text("SPEED UP", color = accent) }
                 TextButton(onClick = onDone) { Text("CLOSE") }
             }
         })

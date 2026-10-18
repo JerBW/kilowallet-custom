@@ -1970,5 +1970,8 @@
 "Resize sent. It locks after its confirmations; the channel keeps working.": "Redimensió enviada. Es fixa després de les seves confirmacions; el canal continua funcionant.",
 "The resize failed": "La redimensió ha fallat",
 "RESIZING…": "REDIMENSIONANT…",
-"TAKE OUT": "TREURE"
+"TAKE OUT": "TREURE",
+"Speed up the transaction": "Accelerar la transacció",
+"The node has no unconfirmed coin from this transaction to speed it up with: it gave no change back to the node, or it already confirmed.": "El node no té cap moneda sense confirmar d'aquesta transacció amb què accelerar-la: no li va tornar canvi, o ja està confirmada.",
+"The node spends its {0} sats of change from it with a second transaction whose fee pays for both, so miners take the two together.": "El node gasta els seus {0} sats de canvi amb una segona transacció la comissió de la qual paga per les dues, així els miners s'emporten les dues juntes."
 }
