@@ -206,12 +206,28 @@ object Ark {
         }
     }
 
-    /** True when the Ark words (and passphrase) are also the XBT spending wallet's. */
+    /** True when the Ark words (and passphrase) are also the XBT spending wallet's (Ark made before 1.1.4). */
     fun wordsShared(ctx: Context): Boolean = prefs(ctx).getBoolean("words_shared", false)
 
     fun setWordsShared(ctx: Context, shared: Boolean) {
         prefs(ctx).edit().putBoolean("words_shared", shared).apply()
     }
+
+    /** True when the Ark words are [derivedWords] of the XBT spending wallet's (1.1.4 on). */
+    fun wordsDerived(ctx: Context): Boolean = prefs(ctx).getBoolean("words_derived", false)
+
+    fun setWordsDerived(ctx: Context, derived: Boolean) {
+        prefs(ctx).edit().putBoolean("words_derived", derived).apply()
+    }
+
+    /**
+     * The Ark wallet's own words, made from the XBT spending wallet's in one direction only:
+     * the first 32 bytes of HMAC-SHA512("Kilowallet Ark v1", BIP-39 seed of [words] and
+     * [passphrase]) as 24 new words, no passphrase. The written words still bring Ark back
+     * (they make these again), but what Ark keeps without the fingerprint, to renew coins in
+     * the background, only opens Ark: never the on-chain coins. As Lightning's root is made.
+     */
+    fun derivedWords(words: List<String>, passphrase: String): List<String> = ArkDerive.words(words, passphrase)
 
     /** The [stateFingerprint] captured by the latest [snapshot]. */
     @Volatile var lastSnapshotFingerprint: String? = null
@@ -247,7 +263,9 @@ object Ark {
         File(dir, "config.toml").writeText(withOurServers(s.config!!))
         File(dir, "db.sqlite").writeBytes(s.db!!)
         s.dbWal?.let { File(dir, "db.sqlite-wal").writeBytes(it) }
-        ArkSeed(ctx).save(s.words, s.passphrase)
+        // A whole-wallet file of an Ark made from derived words carries the wallet's words: make
+        // Ark's own from them again.
+        if (s.arkDerived) ArkSeed(ctx).save(derivedWords(s.words, s.passphrase), "") else ArkSeed(ctx).save(s.words, s.passphrase)
         Contacts.merge(ctx, s.contacts)
         ensureStarted(ctx)
         // The restored wallet is exactly what the file holds.

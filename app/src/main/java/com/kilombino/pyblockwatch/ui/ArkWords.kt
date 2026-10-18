@@ -103,16 +103,19 @@ fun ArkActivate(vm: WalletViewModel, accent: Color, onReady: (newWords: List<Str
     var password by remember { mutableStateOf("") }
     // Restoring something whose words differ from the spending wallet's asks first.
     var mismatch by remember { mutableStateOf<(() -> Unit)?>(null) }
+    // The spending wallet's own words typed to restore Ark: made before 1.1.4 (those words) or after (derived)?
+    var whichArk by remember { mutableStateOf<((derived: Boolean) -> Unit)?>(null) }
     val hot = vm.hasSeed()
 
-    fun create(words: List<String>, passphrase: String, shared: Boolean, isNew: Boolean) {
+    fun create(words: List<String>, passphrase: String, shared: Boolean, isNew: Boolean, derived: Boolean = false) {
         scope.launch {
             busy = if (isNew) "Creating your Ark wallet…" else "Restoring your Ark wallet… (this can take a minute)"
             error = null
             try {
                 withContext(Dispatchers.IO) { Ark.createWallet(app, words, passphrase) }
-                Ark.setWordsShared(app, shared)
-                onReady(if (isNew && !shared) words else null)
+                Ark.setWordsShared(app, shared); Ark.setWordsDerived(app, derived)
+                // Derived words need no writing down: the wallet's words make them again.
+                onReady(if (isNew && !shared && !derived) words else null)
             } catch (e: Exception) { error = e.message ?: e.toString() }
             busy = null
         }
@@ -123,7 +126,7 @@ fun ArkActivate(vm: WalletViewModel, accent: Color, onReady: (newWords: List<Str
             busy = "Restoring from the backup file…"; error = null
             try {
                 withContext(Dispatchers.IO) { Ark.restore(app, s) }
-                Ark.setWordsShared(app, shared)
+                Ark.setWordsShared(app, shared && !s.arkDerived); Ark.setWordsDerived(app, s.arkDerived)
                 onReady(null)
             } catch (e: Exception) { error = e.message ?: e.toString() }
             busy = null
@@ -140,6 +143,8 @@ fun ArkActivate(vm: WalletViewModel, accent: Color, onReady: (newWords: List<Str
                 when {
                     hot == null -> go(false)
                     hot.words == words && hot.passphrase == passphrase -> go(true)
+                    // Ark's words made from the wallet's (1.1.4 on): one set written down, not two.
+                    passphrase.isEmpty() && words == Ark.derivedWords(hot.words, hot.passphrase) -> go(false)
                     else -> mismatch = { go(false) }
                 }
             },
@@ -161,6 +166,19 @@ fun ArkActivate(vm: WalletViewModel, accent: Color, onReady: (newWords: List<Str
                     .onFailure { error = it.message }
             }
             .onFailure { error = it.message }
+    }
+
+    whichArk?.let { go ->
+        AlertDialog(
+            onDismissRequest = { whichArk = null },
+            title = { Text("Which Ark wallet?") },
+            text = { Text("These are your XBT wallet's words. An Ark wallet made with them in Kilowallet 1.1.4 or later has " +
+                "its own words made from them; one made before 1.1.4 used these same words. If you are not sure, try the " +
+                "newer kind first: restoring the other one later is always possible.") },
+            confirmButton = { TextButton(onClick = { whichArk = null; go(true) }) { Text("1.1.4 OR LATER", color = accent) } },
+            dismissButton = { TextButton(onClick = { whichArk = null; go(false) }) { Text("BEFORE 1.1.4", color = TextSoft) } },
+            containerColor = PanelBg, titleContentColor = TextMain, textContentColor = TextSoft,
+        )
     }
 
     mismatch?.let { proceed ->
@@ -212,9 +230,10 @@ fun ArkActivate(vm: WalletViewModel, accent: Color, onReady: (newWords: List<Str
                  style = MaterialTheme.typography.bodySmall, color = TextSoft)
         }
         Spacer(Modifier.height(10.dp))
-        Explain(if (hot) "Ark will use the same words as your XBT spending wallet, so one set of words " +
-                    "backs up both. You will be asked to unlock. Ark keeps them so it can renew coins in the " +
-                    "background, so on an unlocked phone they are readable without the fingerprint."
+        Explain(if (hot) "Ark gets its own words, made from your XBT spending wallet's words, so the words you " +
+                    "wrote down back up both. You will be asked to unlock. Ark keeps its words so it can renew coins " +
+                    "in the background, readable without the fingerprint on an unlocked phone; they open Ark only, " +
+                    "never your on-chain coins."
                 else "Ark gets new words. Write them down when they appear. If you create an XBT " +
                     "spending wallet later, it can use these same words.")
         Spacer(Modifier.height(12.dp))
@@ -223,8 +242,8 @@ fun ArkActivate(vm: WalletViewModel, accent: Color, onReady: (newWords: List<Str
                 enabled = understood && busy == null,
                 onClick = {
                     if (hot) {
-                        withHotWords(activity, vm, "Use the same words for Ark",
-                            onWords = { w -> if (w != null) create(w.words, w.passphrase, shared = true, isNew = true) },
+                        withHotWords(activity, vm, "Make Ark's words from your wallet's",
+                            onWords = { w -> if (w != null) create(Ark.derivedWords(w.words, w.passphrase), "", shared = false, isNew = true, derived = true) },
                             onError = { error = it })
                     } else {
                         val words = Bip39.fromEntropy(ByteArray(16).also { SecureRandom().nextBytes(it) })
@@ -257,7 +276,13 @@ fun ArkActivate(vm: WalletViewModel, accent: Color, onReady: (newWords: List<Str
                 onClick = {
                     val words = phrase.trim().lowercase().split(Regex("\\s+"))
                     if (!Bip39.isValid(words)) { error = "Those words are not a valid BIP-39 phrase." }
-                    else checkAgainstHot(words, passphrase) { shared -> create(words, passphrase, shared, isNew = false) }
+                    else checkAgainstHot(words, passphrase) { shared ->
+                        if (shared) whichArk = { derived ->
+                            if (derived) create(Ark.derivedWords(words, passphrase), "", shared = false, isNew = false, derived = true)
+                            else create(words, passphrase, shared = true, isNew = false)
+                        }
+                        else create(words, passphrase, shared = false, isNew = false)
+                    }
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = accent, contentColor = Ink),
                 shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth(),
@@ -384,6 +409,15 @@ fun ArkBackupPanel(fingerprint: String?, accent: Color, onMessage: (String) -> U
     Panel(accent = accent) {
         SectionLabel("Backup", accent)
         Spacer(Modifier.height(6.dp))
+        if (shared) {
+            // An Ark made before 1.1.4 with the wallet's own words: they sit where Ark can read them
+            // without the fingerprint (to renew coins), so the on-chain coins are reachable that way too.
+            Text("This Ark wallet uses your XBT wallet's own words (it was made before 1.1.4). Ark keeps them readable " +
+                "without the fingerprint to renew coins, so they also open your on-chain coins. To separate them, send your " +
+                "Ark coins to your XBT wallet; Ark wallets made from now on get their own words, made from yours.",
+                style = MaterialTheme.typography.bodySmall, color = Warn)
+            Spacer(Modifier.height(6.dp))
+        }
         val (status, color) = when {
             backedUp == null -> "No backup file saved yet." to Warn
             fingerprint != null && backedUp != fingerprint ->

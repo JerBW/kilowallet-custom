@@ -800,9 +800,10 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
                 runCatching {
                     val ark = com.kilombino.pyblockwatch.ark.Ark
                     val ctx = getApplication<Application>()
-                    if (ark.hasWords(ctx)) ark.setWordsShared(
-                        ctx, ark.words(ctx) == mnemonic && ark.passphrase(ctx) == passphrase,
-                    )
+                    if (ark.hasWords(ctx)) {
+                        ark.setWordsShared(ctx, ark.words(ctx) == mnemonic && ark.passphrase(ctx) == passphrase)
+                        ark.setWordsDerived(ctx, ark.passphrase(ctx).isEmpty() && ark.words(ctx) == ark.derivedWords(mnemonic, passphrase))
+                    }
                 }
                 // The BIP-84 account, and the BIP-86 (Taproot) one so it can be turned on without the seed.
                 val (zpub, tpub) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
@@ -903,6 +904,10 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
             val s = ark.snapshot(ctx)
             // Ark may have its own words; the spending wallet's are what the file restores first.
             if (s.words == words && s.passphrase == passphrase) return s
+            // Ark's words made from these (1.1.4 on): the file keeps the wallet's words and says so.
+            if (s.passphrase.isEmpty() && s.words == ark.derivedWords(words, passphrase))
+                return com.kilombino.pyblockwatch.ark.ArkBackup.Snapshot(words, passphrase, s.config, s.db, s.dbWal, s.movements,
+                    s.created, s.contacts, s.app, arkDerived = true)
         }
         return com.kilombino.pyblockwatch.ark.ArkBackup.Snapshot(
             words = words, passphrase = passphrase, config = null, db = null, dbWal = null,
@@ -932,7 +937,10 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
                         com.kilombino.pyblockwatch.data.Contacts.merge(ctx, s.contacts)
                         if (s.hasArk) {
                             val ark = com.kilombino.pyblockwatch.ark.Ark
-                            if (ark.available) { ark.restore(ctx, s); ark.setWordsShared(ctx, true) }
+                            if (ark.available) {
+                                ark.restore(ctx, s)
+                                ark.setWordsShared(ctx, !s.arkDerived); ark.setWordsDerived(ctx, s.arkDerived)
+                            }
                             else warning = "This phone cannot run Ark: the Ark part of the backup was not restored."
                         }
                     }
