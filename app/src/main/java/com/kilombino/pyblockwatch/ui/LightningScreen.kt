@@ -43,6 +43,7 @@ import com.kilombino.pyblockwatch.crypto.Bip39
 import com.kilombino.pyblockwatch.ln.Lightning
 import com.kilombino.pyblockwatch.ln.Lnd
 import com.kilombino.pyblockwatch.ln.LnMove
+import com.kilombino.pyblockwatch.ln.LnSeed
 import com.kilombino.pyblockwatch.ln.Inbound
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -118,7 +119,7 @@ private fun turnOn(activity: FragmentActivity, vm: WalletViewModel, onError: (St
                 runCatching {
                     val seed = withContext(Dispatchers.Default) {
                         val secret = vm.revealSecret(authed)
-                        Bip39.toSeed(secret.words, secret.passphrase)
+                        Bip39.toSeed(secret.words, secret.passphrase).also { LnSeed.rememberExpected(activity, it) }
                     }
                     withContext(Dispatchers.IO) { Lightning.enable(activity.applicationContext, seed) }
                 }.onFailure { onError(it.message ?: "Lightning could not be turned on") }
@@ -216,6 +217,16 @@ private fun LnNode(s: Lightning.Status.Running, accent: Color, settings: Boolean
     var sheet by remember { mutableStateOf(LnSheet.None) }
     val i = s.info
     val b = s.balances
+    // A node moved in from a phone with other words, or a wallet changed after Lightning was
+    // turned on: its coins are those words', and this wallet's words would never bring them back.
+    val expected = LnSeed.expectedPubkey(LocalContext.current)
+    if (expected != null && i.pubkey.isNotEmpty() && !expected.equals(i.pubkey, ignoreCase = true)) Panel(accent = Bad) {
+        SectionLabel("This node is not from this wallet's words", Bad)
+        Explain("Its keys come from other recovery words: it was moved in from a phone with another wallet, or the wallet was " +
+            "changed after Lightning was turned on. Its on-chain coins and its channels come back only with THOSE words, not " +
+            "with this wallet's, nor with the backup file. Move its coins to this wallet (close the channels, then PAY → " +
+            "on-chain to an address of this wallet) and keep the other words until then. Node: ${i.pubkey.take(20)}…")
+    }
     Panel(accent = accent) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             PulseDot(if (i.syncedChain) Good else Warn); Spacer(Modifier.width(8.dp))
@@ -235,12 +246,16 @@ private fun LnNode(s: Lightning.Status.Running, accent: Color, settings: Boolean
         val ln = b?.channels ?: 0
         val chain = (b?.onchainConfirmed ?: 0) + (b?.onchainUnconfirmed ?: 0)
         val closingSats = s.closing.sumOf { it.limbo }
-        Text(street("${groupSats(ln + chain + closingSats + (b?.pendingOpen ?: 0))} sats"), style = MaterialTheme.typography.headlineSmall, color = accent)
+        // Until the wallet has looked through the chain for its coins, its on-chain figure (and so
+        // the total) may still grow: "–", not a 0 that reads as final.
+        val known = i.syncedChain
+        Text(if (known) street("${groupSats(ln + chain + closingSats + (b?.pendingOpen ?: 0))} sats") else "– sats",
+            style = MaterialTheme.typography.headlineSmall, color = accent)
         Text("in the Lightning node", style = MaterialTheme.typography.bodySmall, color = TextFaint)
         Spacer(Modifier.height(8.dp))
         BalanceLine("⚡ Lightning (in channels)", ln, TextMain)
         BalanceLine("⛓ On-chain in the node", b?.onchainConfirmed ?: 0, TextSoft,
-            (b?.onchainUnconfirmed ?: 0).takeIf { it > 0 }?.let { "+" + street(groupSats(it)) + " unconfirmed" })
+            (b?.onchainUnconfirmed ?: 0).takeIf { it > 0 && known }?.let { "+" + street(groupSats(it)) + " unconfirmed" }, known = known)
         if ((b?.pendingOpen ?: 0) > 0) BalanceLine("⏳ Opening channels", b!!.pendingOpen, Warn)
         if (closingSats > 0) BalanceLine("⏳ Closing channels", closingSats, Warn)
     }
@@ -1201,10 +1216,10 @@ private fun LnLog(accent: Color) {
 
 /** One movement in the channels: [delta] in sats (+ received, − paid with its fee), [left] after it. */
 @Composable
-private fun BalanceLine(label: String, sats: Long, color: Color, note: String? = null) {
+private fun BalanceLine(label: String, sats: Long, color: Color, note: String? = null, known: Boolean = true) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(label, style = MaterialTheme.typography.bodySmall, color = color, modifier = Modifier.weight(1f))
-        Text(street(groupSats(sats)) + " sats", style = MaterialTheme.typography.bodySmall, color = color)
+        Text((if (known) street(groupSats(sats)) else "–") + " sats", style = MaterialTheme.typography.bodySmall, color = color)
     }
     note?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = TextFaint) }
 }

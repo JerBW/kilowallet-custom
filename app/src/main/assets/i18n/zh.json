@@ -1895,5 +1895,18 @@
 "the node does not know this transaction": "节点不知道这笔交易",
 "could not work out the close's fee": "无法算出关闭交易的手续费",
 "that fee would take too much of the coin": "该手续费会占用该币过多",
-"could not speed it up": "无法加速"
+"could not speed it up": "无法加速",
+"This node is not from this wallet's words": "此节点并非来自本钱包的助记词",
+"Its keys come from other recovery words: it was moved in from a phone with another wallet, or the wallet was changed after Lightning was turned on. Its on-chain coins and its channels come back only with THOSE words, not with this wallet's, nor with the backup file. Move its coins to this wallet (close the channels, then PAY → on-chain to an address of this wallet) and keep the other words until then. Node: {0}…": "它的密钥来自另一组助记词：它是从装有另一个钱包的手机迁移过来的，或者在开启 Lightning 之后更换了钱包。它的链上币和通道只能用那组助记词找回，本钱包的助记词和备份文件都不行。请把它的币转到本钱包（先关闭通道，再用 付款 → 链上 发送到本钱包的地址），在此之前保留那组助记词。节点：{0}…",
+"Your Lightning node is not running. Open the Lightning tab and wait until it runs, so it can be checked first.": "你的 Lightning 节点未在运行。请打开 Lightning 标签页并等待其运行，以便先进行检查。",
+"Your Lightning node still has channels open, opening or closing. Close them and wait until their coins are back on-chain in the node: a deleted node can't get them back by itself.": "你的 Lightning 节点仍有打开、正在打开或正在关闭的通道。请关闭它们，并等到其币回到节点的链上：被删除的节点无法自行取回它们。",
+"Wait until the Lightning node has finished checking its coins.": "请等待 Lightning 节点检查完其币。",
+"Your Lightning node is from other recovery words and holds {0} sats on-chain that this wallet's words won't bring back. Send them to this wallet first (Lightning → PAY → on-chain).": "你的 Lightning 节点来自另一组助记词，持有 {0} sats 链上资金，本钱包的助记词无法找回。请先把它们发送到本钱包（Lightning → 付款 → 链上）。",
+" This wallet's Lightning node and Ark wallet are removed from this phone too.": " 本钱包的 Lightning 节点和 Ark 钱包也会从这台手机上删除。",
+"Ark wallet in your backup": "备份中的 Ark 钱包",
+"The backup file brought back an Ark wallet. It stays off, without looking up balances or sending alerts, until you turn it on.": "备份文件恢复了一个 Ark 钱包。在你开启之前，它保持关闭，不查询余额，也不发送提醒。",
+"TURN ON ARK": "开启 ARK",
+"Ark: balance found": "Ark：发现余额",
+"{0} sats in Ark": "Ark 中有 {0} sats",
+"{0} sats in Ark and {1} sats in its on-chain deposit": "Ark 中有 {0} sats，其链上存款中有 {1} sats"
 }

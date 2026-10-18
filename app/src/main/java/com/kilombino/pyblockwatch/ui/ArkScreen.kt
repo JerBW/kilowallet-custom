@@ -34,6 +34,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -81,6 +82,8 @@ private sealed interface ArkView {
     data class Failed(val message: String) : ArkView
     data object NoWallet : ArkView
     data object Ready : ArkView
+    /** Brought back by a backup file, waiting to be turned on. */
+    data object Paused : ArkView
 }
 
 /** The user's fiat choice and the latest price, for "≈ $" lines across the Ark tab. */
@@ -160,7 +163,10 @@ private fun ArkScreenBody(vm: WalletViewModel, accent: Color, pull: Int) {
             onSuccess = { run(label, block) },
             onError = { message = "Error: $it" })
 
-    LaunchedEffect(Unit) {
+    var turnOn by remember { mutableIntStateOf(0) }
+    LaunchedEffect(turnOn) {
+        if (Ark.paused(ctx)) { view = ArkView.Paused; return@LaunchedEffect }
+        view = ArkView.Starting
         view = try {
             withContext(Dispatchers.IO) {
                 Ark.ensureStarted(ctx)
@@ -197,6 +203,15 @@ private fun ArkScreenBody(vm: WalletViewModel, accent: Color, pull: Int) {
         is ArkView.Failed -> Panel(accent = Bad) {
             SectionLabel("Ark could not start", Bad); Spacer(Modifier.height(8.dp))
             Explain(v.message)
+        }
+        ArkView.Paused -> Panel(accent = accent) {
+            SectionLabel("Ark wallet in your backup", accent); Spacer(Modifier.height(8.dp))
+            Explain("The backup file brought back an Ark wallet. It stays off, without looking up balances or sending alerts, until you turn it on.")
+            Spacer(Modifier.height(10.dp))
+            Button(onClick = { Ark.setPaused(ctx, false); Ark.setAnnounceFound(ctx, true); turnOn++ },
+                colors = ButtonDefaults.buttonColors(containerColor = accent), modifier = Modifier.fillMaxWidth()) {
+                Text("TURN ON ARK", color = Ink, style = MaterialTheme.typography.titleMedium)
+            }
         }
         ArkView.NoWallet -> {
             ArkWarnings()

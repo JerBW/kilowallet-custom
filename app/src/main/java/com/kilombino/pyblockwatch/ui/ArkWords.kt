@@ -54,14 +54,25 @@ import java.util.Locale
 @Composable
 fun WordsGrid(words: List<String>) {
     SecureWhileShown()
-    Panel(accent = Purple) {
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            words.chunked(2).forEachIndexed { rowIdx, pair ->
-                Row(Modifier.fillMaxWidth()) {
-                    pair.forEachIndexed { colIdx, w ->
-                        Text("${rowIdx * 2 + colIdx + 1}. $w", style = MaterialTheme.typography.bodyMedium,
-                             fontFamily = FontFamily.Monospace, color = TextMain, modifier = Modifier.weight(1f))
-                    }
+    Panel(accent = Purple) { WordColumns(words) }
+}
+
+/**
+ * Seed words numbered in two columns read top to bottom (1–6 | 7–12, 1–12 | 13–24), as they
+ * are written on paper. Never translated: "receive" or "wallet" are seed words, not labels.
+ */
+@Composable
+fun WordColumns(words: List<String>) {
+    val half = (words.size + 1) / 2
+    val width = words.size.toString().length
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        for (row in 0 until half) {
+            Row(Modifier.fillMaxWidth()) {
+                for (i in listOf(row, row + half)) {
+                    if (i < words.size) androidx.compose.material3.Text("${(i + 1).toString().padStart(width)}. ${words[i]}",
+                        style = MaterialTheme.typography.bodyMedium, fontFamily = FontFamily.Monospace, color = TextMain,
+                        modifier = Modifier.weight(1f))
+                    else Spacer(Modifier.weight(1f))
                 }
             }
         }
@@ -114,6 +125,7 @@ fun ArkActivate(vm: WalletViewModel, accent: Color, onReady: (newWords: List<Str
             try {
                 withContext(Dispatchers.IO) { Ark.createWallet(app, words, passphrase) }
                 Ark.setWordsShared(app, shared); Ark.setWordsDerived(app, derived)
+                if (!isNew) Ark.setAnnounceFound(app, true)
                 // Derived words need no writing down: the wallet's words make them again.
                 onReady(if (isNew && !shared && !derived) words else null)
             } catch (e: Exception) { error = e.message ?: e.toString() }
@@ -127,6 +139,7 @@ fun ArkActivate(vm: WalletViewModel, accent: Color, onReady: (newWords: List<Str
             try {
                 withContext(Dispatchers.IO) { Ark.restore(app, s) }
                 Ark.setWordsShared(app, shared && !s.arkDerived); Ark.setWordsDerived(app, s.arkDerived)
+                Ark.setAnnounceFound(app, true)
                 onReady(null)
             } catch (e: Exception) { error = e.message ?: e.toString() }
             busy = null

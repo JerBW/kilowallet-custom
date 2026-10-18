@@ -197,6 +197,17 @@ object Lightning {
         markOff()
     }
 
+    /**
+     * Removes the node of a wallet that was forgotten or replaced, with all it remembered (name,
+     * birthday, password). The caller made sure no channel is open or closing.
+     */
+    suspend fun wipe(ctx: Context) {
+        val app = ctx.applicationContext
+        if (Lnd.running || Lnd.dir(app).exists()) deleteNode(app)
+        app.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().clear().commit()
+        File(app.noBackupFilesDir, RESTORE_SCB).delete()
+    }
+
     fun enabled(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean("enabled", false)
 
     fun peers(ctx: Context): List<String> =

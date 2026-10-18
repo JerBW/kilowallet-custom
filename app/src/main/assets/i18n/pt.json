@@ -1907,5 +1907,18 @@
 "the node does not know this transaction": "o nó não conhece esta transação",
 "could not work out the close's fee": "não foi possível calcular a taxa do fecho",
 "that fee would take too much of the coin": "essa taxa levaria demasiado da moeda",
-"could not speed it up": "não foi possível acelerar"
+"could not speed it up": "não foi possível acelerar",
+"This node is not from this wallet's words": "Este nó não vem das palavras desta carteira",
+"Its keys come from other recovery words: it was moved in from a phone with another wallet, or the wallet was changed after Lightning was turned on. Its on-chain coins and its channels come back only with THOSE words, not with this wallet's, nor with the backup file. Move its coins to this wallet (close the channels, then PAY → on-chain to an address of this wallet) and keep the other words until then. Node: {0}…": "As chaves dele vêm de outras palavras de recuperação: foi trazido de um telemóvel com outra carteira, ou a carteira foi trocada depois de ativar o Lightning. As moedas on-chain e os canais dele só voltam com ESSAS palavras, não com as desta carteira nem com o ficheiro de cópia. Passa as moedas dele para esta carteira (fecha os canais e depois PAGAR → on-chain para um endereço desta carteira) e guarda as outras palavras até lá. Nó: {0}…",
+"Your Lightning node is not running. Open the Lightning tab and wait until it runs, so it can be checked first.": "O teu nó Lightning não está a correr. Abre o separador Lightning e espera que arranque, para o poder verificar antes.",
+"Your Lightning node still has channels open, opening or closing. Close them and wait until their coins are back on-chain in the node: a deleted node can't get them back by itself.": "O teu nó Lightning ainda tem canais abertos, a abrir ou a fechar. Fecha-os e espera que as moedas voltem on-chain ao nó: um nó apagado não as consegue recuperar sozinho.",
+"Wait until the Lightning node has finished checking its coins.": "Espera que o nó Lightning acabe de verificar as suas moedas.",
+"Your Lightning node is from other recovery words and holds {0} sats on-chain that this wallet's words won't bring back. Send them to this wallet first (Lightning → PAY → on-chain).": "O teu nó Lightning vem de outras palavras de recuperação e tem {0} sats on-chain que as palavras desta carteira não recuperam. Envia-os primeiro para esta carteira (Lightning → PAGAR → on-chain).",
+" This wallet's Lightning node and Ark wallet are removed from this phone too.": " O nó Lightning e a carteira Ark desta carteira também são apagados deste telemóvel.",
+"Ark wallet in your backup": "Carteira Ark na tua cópia",
+"The backup file brought back an Ark wallet. It stays off, without looking up balances or sending alerts, until you turn it on.": "O ficheiro de cópia trouxe uma carteira Ark. Fica desligada, sem consultar saldos nem enviar avisos, até a ativares.",
+"TURN ON ARK": "ATIVAR ARK",
+"Ark: balance found": "Ark: saldo encontrado",
+"{0} sats in Ark": "{0} sats na Ark",
+"{0} sats in Ark and {1} sats in its on-chain deposit": "{0} sats na Ark e {1} sats no seu depósito on-chain"
 }

@@ -552,11 +552,45 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
         clearSnapshots()
         val wasWatch = store.activeWallet == Store.WATCH
         store.clearWallet()
-        if (!wasWatch) seedVault.clear()
+        if (!wasWatch) { seedVault.clear(); wipeWalletBound() }
         val other = if (wasWatch) Store.HOT else Store.WATCH
         if (Store(getApplication(), other).xpub != null) { switchTo(other); return }
         store = Store(getApplication(), Store.HOT); store.activeWallet = Store.HOT
         _state.value = UiState(notificationsEnabled = store.notificationsEnabled)
+    }
+
+    /**
+     * The Lightning node and the Ark wallet belong to the spending wallet's words: when the wallet
+     * is forgotten or replaced they go too, so restoring words later asks before turning either
+     * on, and a node of other words never stays behind looking like this wallet's.
+     */
+    fun wipeWalletBound() {
+        val ctx = getApplication<Application>()
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+            runCatching { com.kilombino.pyblockwatch.ln.Lightning.wipe(ctx) }
+            runCatching { if (com.kilombino.pyblockwatch.ark.Ark.available) com.kilombino.pyblockwatch.ark.Ark.wipe(ctx) }
+        }
+    }
+
+    /**
+     * Why the spending wallet can't be forgotten or replaced yet, or null: its Lightning node
+     * must be running and checked, with no channel open or closing (a deleted node can't get
+     * those back by itself), and a node of other words must have sent its coins away first.
+     */
+    fun walletBoundBlock(): String? {
+        val ctx = getApplication<Application>()
+        val ln = com.kilombino.pyblockwatch.ln.Lightning
+        if (!ln.enabled(ctx) && !com.kilombino.pyblockwatch.ln.Lnd.dir(ctx).exists()) return null
+        val st = ln.status.value as? com.kilombino.pyblockwatch.ln.Lightning.Status.Running
+            ?: return "Your Lightning node is not running. Open the Lightning tab and wait until it runs, so it can be checked first."
+        if (st.channels.isNotEmpty() || st.pending.isNotEmpty() || st.closing.isNotEmpty())
+            return "Your Lightning node still has channels open, opening or closing. Close them and wait until their coins are back on-chain in the node: a deleted node can't get them back by itself."
+        if (!st.info.syncedChain) return "Wait until the Lightning node has finished checking its coins."
+        val onchain = (st.balances?.onchainConfirmed ?: 0) + (st.balances?.onchainUnconfirmed ?: 0)
+        val expected = com.kilombino.pyblockwatch.ln.LnSeed.expectedPubkey(ctx)
+        if (onchain > 0 && expected != null && !expected.equals(st.info.pubkey, ignoreCase = true))
+            return "Your Lightning node is from other recovery words and holds ${groupSats(onchain)} sats on-chain that this wallet's words won't bring back. Send them to this wallet first (Lightning → PAY → on-chain)."
+        return null
     }
 
     fun endpointFor(chain: Chain): NodeEndpoint = store.endpoint(chain)
@@ -807,8 +841,10 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 // The BIP-84 account, and the BIP-86 (Taproot) one so it can be turned on without the seed.
                 val (zpub, tpub) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
-                    val master = com.kilombino.pyblockwatch.crypto.Bip32Priv
-                        .fromSeed(com.kilombino.pyblockwatch.crypto.Bip39.toSeed(mnemonic, passphrase))
+                    val seed = com.kilombino.pyblockwatch.crypto.Bip39.toSeed(mnemonic, passphrase)
+                    // The pubkey a Lightning node from these words has, to tell a node of other words apart.
+                    runCatching { com.kilombino.pyblockwatch.ln.LnSeed.rememberExpected(getApplication(), seed) }
+                    val master = com.kilombino.pyblockwatch.crypto.Bip32Priv.fromSeed(seed)
                     com.kilombino.pyblockwatch.crypto.Bip32Priv.accountXpub(master, purpose = 84, account = 0) to
                         com.kilombino.pyblockwatch.crypto.Bip32Priv.accountXpub(master, purpose = 86, account = 0)
                 }
@@ -940,6 +976,8 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
                             if (ark.available) {
                                 ark.restore(ctx, s)
                                 ark.setWordsShared(ctx, !s.arkDerived); ark.setWordsDerived(ctx, s.arkDerived)
+                                // It waits in the Ark tab until the user turns it on.
+                                ark.setPaused(ctx, true)
                             }
                             else warning = "This phone cannot run Ark: the Ark part of the backup was not restored."
                         }

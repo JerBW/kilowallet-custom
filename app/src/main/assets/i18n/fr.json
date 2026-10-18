@@ -1907,5 +1907,18 @@
 "the node does not know this transaction": "le nœud ne connaît pas cette transaction",
 "could not work out the close's fee": "impossible de calculer les frais de la fermeture",
 "that fee would take too much of the coin": "ces frais prendraient trop de la pièce",
-"could not speed it up": "impossible d'accélérer"
+"could not speed it up": "impossible d'accélérer",
+"This node is not from this wallet's words": "Ce nœud ne vient pas des mots de ce portefeuille",
+"Its keys come from other recovery words: it was moved in from a phone with another wallet, or the wallet was changed after Lightning was turned on. Its on-chain coins and its channels come back only with THOSE words, not with this wallet's, nor with the backup file. Move its coins to this wallet (close the channels, then PAY → on-chain to an address of this wallet) and keep the other words until then. Node: {0}…": "Ses clés viennent d'autres mots de récupération : il a été transféré depuis un téléphone avec un autre portefeuille, ou le portefeuille a été changé après l'activation de Lightning. Ses pièces on-chain et ses canaux ne reviennent qu'avec CES mots-là, pas avec ceux de ce portefeuille ni avec le fichier de sauvegarde. Transfère ses pièces vers ce portefeuille (ferme les canaux, puis PAYER → on-chain vers une adresse de ce portefeuille) et garde les autres mots d'ici là. Nœud : {0}…",
+"Your Lightning node is not running. Open the Lightning tab and wait until it runs, so it can be checked first.": "Ton nœud Lightning ne tourne pas. Ouvre l'onglet Lightning et attends qu'il démarre, pour pouvoir le vérifier avant.",
+"Your Lightning node still has channels open, opening or closing. Close them and wait until their coins are back on-chain in the node: a deleted node can't get them back by itself.": "Ton nœud Lightning a encore des canaux ouverts, en ouverture ou en fermeture. Ferme-les et attends que leurs pièces soient revenues on-chain dans le nœud : un nœud supprimé ne peut pas les récupérer tout seul.",
+"Wait until the Lightning node has finished checking its coins.": "Attends que le nœud Lightning ait fini de vérifier ses pièces.",
+"Your Lightning node is from other recovery words and holds {0} sats on-chain that this wallet's words won't bring back. Send them to this wallet first (Lightning → PAY → on-chain).": "Ton nœud Lightning vient d'autres mots de récupération et détient {0} sats on-chain que les mots de ce portefeuille ne récupèrent pas. Envoie-les d'abord à ce portefeuille (Lightning → PAYER → on-chain).",
+" This wallet's Lightning node and Ark wallet are removed from this phone too.": " Le nœud Lightning et le portefeuille Ark de ce portefeuille sont aussi supprimés de ce téléphone.",
+"Ark wallet in your backup": "Portefeuille Ark dans ta sauvegarde",
+"The backup file brought back an Ark wallet. It stays off, without looking up balances or sending alerts, until you turn it on.": "Le fichier de sauvegarde a ramené un portefeuille Ark. Il reste éteint, sans consulter de soldes ni envoyer d'alertes, jusqu'à ce que tu l'actives.",
+"TURN ON ARK": "ACTIVER ARK",
+"Ark: balance found": "Ark : solde trouvé",
+"{0} sats in Ark": "{0} sats dans Ark",
+"{0} sats in Ark and {1} sats in its on-chain deposit": "{0} sats dans Ark et {1} sats dans son dépôt on-chain"
 }

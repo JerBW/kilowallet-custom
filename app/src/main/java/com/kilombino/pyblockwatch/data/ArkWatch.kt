@@ -21,7 +21,14 @@ object ArkWatch {
     @Synchronized
     fun evaluate(ctx: Context, notifier: Notifier) {
         val prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        runCatching { Ark.balance() }.getOrNull() ?: return
+        val balance = runCatching { Ark.balance() }.getOrNull() ?: return
+        // A wallet just restored and turned on: one alert with what it found, not one per old movement.
+        if (Ark.announceFound(ctx)) {
+            val inArk = balance.spendable + balance.pendingBoard + balance.pendingRound + balance.needsRefresh
+            val deposit = balance.onchainConfirmed + balance.onchainPending
+            if (inArk + deposit > 0) notifier.arkFound(inArk, deposit)
+            Ark.setAnnounceFound(ctx, false)
+        }
         val movements = Ark.activity()
 
         // Said once per new disagreement, not on every pass.

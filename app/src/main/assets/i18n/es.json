@@ -1907,5 +1907,18 @@
 "the node does not know this transaction": "el nodo no conoce esta transacción",
 "could not work out the close's fee": "no se pudo calcular la comisión del cierre",
 "that fee would take too much of the coin": "esa comisión se llevaría demasiado de la moneda",
-"could not speed it up": "no se pudo acelerar"
+"could not speed it up": "no se pudo acelerar",
+"This node is not from this wallet's words": "Este nodo no sale de las palabras de esta cartera",
+"Its keys come from other recovery words: it was moved in from a phone with another wallet, or the wallet was changed after Lightning was turned on. Its on-chain coins and its channels come back only with THOSE words, not with this wallet's, nor with the backup file. Move its coins to this wallet (close the channels, then PAY → on-chain to an address of this wallet) and keep the other words until then. Node: {0}…": "Sus claves salen de otras palabras de recuperación: se trajo de un móvil con otra cartera, o la cartera se cambió después de activar Lightning. Sus monedas on-chain y sus canales solo vuelven con ESAS palabras, no con las de esta cartera ni con el archivo de copia. Pasa sus monedas a esta cartera (cierra los canales y luego PAGAR → on-chain a una dirección de esta cartera) y guarda las otras palabras hasta entonces. Nodo: {0}…",
+"Your Lightning node is not running. Open the Lightning tab and wait until it runs, so it can be checked first.": "Tu nodo Lightning no está en marcha. Abre la pestaña Lightning y espera a que arranque, para poder comprobarlo antes.",
+"Your Lightning node still has channels open, opening or closing. Close them and wait until their coins are back on-chain in the node: a deleted node can't get them back by itself.": "Tu nodo Lightning aún tiene canales abiertos, abriéndose o cerrándose. Ciérralos y espera a que sus monedas vuelvan on-chain al nodo: un nodo borrado no puede recuperarlas por sí solo.",
+"Wait until the Lightning node has finished checking its coins.": "Espera a que el nodo Lightning termine de comprobar sus monedas.",
+"Your Lightning node is from other recovery words and holds {0} sats on-chain that this wallet's words won't bring back. Send them to this wallet first (Lightning → PAY → on-chain).": "Tu nodo Lightning es de otras palabras de recuperación y tiene {0} sats on-chain que las palabras de esta cartera no recuperan. Mándalos antes a esta cartera (Lightning → PAGAR → on-chain).",
+" This wallet's Lightning node and Ark wallet are removed from this phone too.": " El nodo Lightning y el monedero Ark de esta cartera también se borran de este móvil.",
+"Ark wallet in your backup": "Monedero Ark en tu copia",
+"The backup file brought back an Ark wallet. It stays off, without looking up balances or sending alerts, until you turn it on.": "El archivo de copia ha traído un monedero Ark. Se queda apagado, sin consultar saldos ni mandar avisos, hasta que lo actives.",
+"TURN ON ARK": "ACTIVAR ARK",
+"Ark: balance found": "Ark: saldo detectado",
+"{0} sats in Ark": "{0} sats en Ark",
+"{0} sats in Ark and {1} sats in its on-chain deposit": "{0} sats en Ark y {1} sats en su depósito on-chain"
 }

@@ -1907,5 +1907,18 @@
 "the node does not know this transaction": "el node no coneix aquesta transacció",
 "could not work out the close's fee": "no s'ha pogut calcular la comissió del tancament",
 "that fee would take too much of the coin": "aquesta comissió s'enduria massa de la moneda",
-"could not speed it up": "no s'ha pogut accelerar"
+"could not speed it up": "no s'ha pogut accelerar",
+"This node is not from this wallet's words": "Aquest node no surt de les paraules d'aquesta cartera",
+"Its keys come from other recovery words: it was moved in from a phone with another wallet, or the wallet was changed after Lightning was turned on. Its on-chain coins and its channels come back only with THOSE words, not with this wallet's, nor with the backup file. Move its coins to this wallet (close the channels, then PAY → on-chain to an address of this wallet) and keep the other words until then. Node: {0}…": "Les seves claus surten d'altres paraules de recuperació: es va portar d'un mòbil amb una altra cartera, o la cartera es va canviar després d'activar Lightning. Les seves monedes on-chain i els seus canals només tornen amb AQUESTES altres paraules, no amb les d'aquesta cartera ni amb l'arxiu de còpia. Passa les seves monedes a aquesta cartera (tanca els canals i després PAGAR → on-chain a una adreça d'aquesta cartera) i guarda les altres paraules fins aleshores. Node: {0}…",
+"Your Lightning node is not running. Open the Lightning tab and wait until it runs, so it can be checked first.": "El teu node Lightning no està en marxa. Obre la pestanya Lightning i espera que arrenqui, per poder comprovar-lo abans.",
+"Your Lightning node still has channels open, opening or closing. Close them and wait until their coins are back on-chain in the node: a deleted node can't get them back by itself.": "El teu node Lightning encara té canals oberts, obrint-se o tancant-se. Tanca'ls i espera que les seves monedes tornin on-chain al node: un node esborrat no les pot recuperar tot sol.",
+"Wait until the Lightning node has finished checking its coins.": "Espera que el node Lightning acabi de comprovar les seves monedes.",
+"Your Lightning node is from other recovery words and holds {0} sats on-chain that this wallet's words won't bring back. Send them to this wallet first (Lightning → PAY → on-chain).": "El teu node Lightning és d'altres paraules de recuperació i té {0} sats on-chain que les paraules d'aquesta cartera no recuperen. Envia'ls abans a aquesta cartera (Lightning → PAGAR → on-chain).",
+" This wallet's Lightning node and Ark wallet are removed from this phone too.": " El node Lightning i el moneder Ark d'aquesta cartera també s'esborren d'aquest mòbil.",
+"Ark wallet in your backup": "Moneder Ark a la teva còpia",
+"The backup file brought back an Ark wallet. It stays off, without looking up balances or sending alerts, until you turn it on.": "L'arxiu de còpia ha portat un moneder Ark. Es queda apagat, sense consultar saldos ni enviar avisos, fins que l'activis.",
+"TURN ON ARK": "ACTIVAR ARK",
+"Ark: balance found": "Ark: saldo detectat",
+"{0} sats in Ark": "{0} sats a Ark",
+"{0} sats in Ark and {1} sats in its on-chain deposit": "{0} sats a Ark i {1} sats al seu dipòsit on-chain"
 }

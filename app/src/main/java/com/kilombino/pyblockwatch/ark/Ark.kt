@@ -68,6 +68,20 @@ object Ark {
     }
 
     /**
+     * Removes the Ark wallet from this phone (its wallet was forgotten or replaced): the engine
+     * stops and its database, words and alerts go. The coins stay with the server and come back
+     * from the words, or from a backup file.
+     */
+    fun wipe(ctx: Context) {
+        val app = ctx.applicationContext
+        stop()
+        datadir(app).deleteRecursively()
+        ArkSeed(app).clear()
+        prefs(app).edit().clear().commit()
+        app.getSharedPreferences("kilombino_ark_watch", Context.MODE_PRIVATE).edit().clear().commit()
+    }
+
+    /**
      * Restarts the engine with a recovery-mailbox scan first: the server's record of every
      * coin these words were given. It brings in coins this phone never recorded (a round that
      * finished on the server after the app lost track of it, or a renewal made with the same
@@ -207,6 +221,17 @@ object Ark {
     }
 
     /** True when the Ark words (and passphrase) are also the XBT spending wallet's (Ark made before 1.1.4). */
+    /**
+     * An Ark wallet brought back by a whole-wallet backup file waits for the user to turn it on
+     * in the Ark tab: until then the engine does not start, look up balances or send alerts.
+     */
+    fun paused(ctx: Context): Boolean = prefs(ctx).getBoolean("paused", false)
+    fun setPaused(ctx: Context, on: Boolean) { prefs(ctx).edit().putBoolean("paused", on).apply() }
+
+    /** Set when a restored Ark wallet starts: its first look tells what it found, once. */
+    fun announceFound(ctx: Context) = prefs(ctx).getBoolean("announce_found", false)
+    fun setAnnounceFound(ctx: Context, on: Boolean) { prefs(ctx).edit().putBoolean("announce_found", on).apply() }
+
     fun wordsShared(ctx: Context): Boolean = prefs(ctx).getBoolean("words_shared", false)
 
     fun setWordsShared(ctx: Context, shared: Boolean) {
