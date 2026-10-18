@@ -1270,9 +1270,18 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
                         val raw = client.transaction(txid)
                         val tx = com.kilombino.pyblockwatch.crypto.TxParse.parse(raw)
                         val parentVsize = com.kilombino.pyblockwatch.crypto.TxParse.vsize(raw)
-                        val parentFee = tx.inputs.sumOf { i ->
-                            com.kilombino.pyblockwatch.crypto.TxParse.parse(client.transaction(i.txid)).outputs[i.vout].value
-                        } - tx.outputs.sumOf { it.value }
+                        val prevs = tx.inputs.map { i -> i to com.kilombino.pyblockwatch.crypto.TxParse.parse(client.transaction(i.txid)).outputs[i.vout] }
+                        val parentFee = prevs.sumOf { it.second.value } - tx.outputs.sumOf { it.value }
+                        // The child pays for its parent only: if the parent spends coins that are
+                        // themselves unconfirmed, miners weigh those too and the package rate shown
+                        // would be too high. Speed up the oldest one first.
+                        val unconfirmedAncestor = prevs.any { (i, o) ->
+                            client.history(com.kilombino.pyblockwatch.crypto.Address.electrumScriptHash(o.scriptPubKey))
+                                .firstOrNull { it.txid == i.txid }?.let { it.height <= 0 } ?: false
+                        }
+                        require(!unconfirmedAncestor) {
+                            "This transaction spends coins that are not confirmed yet either: speed up the earlier one first."
+                        }
                         val byHash = cs.rows.associateBy { it.scriptHash }
                         val unspent = cs.rows.filter { it.isUsed }.flatMap { r -> client.listUnspent(r.scriptHash) }
                             .map { "${it.txid}:${it.vout}" }.toSet()
@@ -1342,7 +1351,7 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
                             oldFee + estimateFee(inputs.size, outs.map { it.scriptPubKey }, 1.0, taprootIn(inputs)) + 1,
                         )
                         val change = outs[changeIdx].value - (newFee - oldFee)
-                        require(change > DUST_SATS) {
+                        require(change >= dustFor(outs[changeIdx].scriptPubKey)) {
                             "The change (${outs[changeIdx].value} sats) can't cover the new fee of $newFee sats."
                         }
                         val newOuts = outs.mapIndexed { n, o -> if (n == changeIdx) o.copy(value = change) else o }
@@ -1458,6 +1467,11 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
                             .also { requireSpendableDestination(it, "Recipient ${i + 2}") }, sats)
                 }
                 val totalOut = amountSats + extraOuts.sumOf { it.value }
+                // An output under its type's dust limit is refused by the network: say so here.
+                dustFor(toScript).let { d -> require(amountSats >= d) { "Enter at least $d sats: less can't be sent to that kind of address." } }
+                extraOuts.forEachIndexed { i, o ->
+                    dustFor(o.scriptPubKey).let { d -> require(o.value >= d) { "Recipient ${i + 2}: enter at least $d sats for that kind of address." } }
+                }
 
                 val changeScript = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
                     changeScriptPubKey(nextChangeIndex(cs.rows))
@@ -1503,7 +1517,8 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
                     com.kilombino.pyblockwatch.crypto.TxBuilder.Output(toScript, amountSats),
                 )
                 outputs += extraOuts
-                if (change > DUST_SATS && !noChangeOutput) {
+                // Taproot change has a higher dust limit (330) than bc1q (294).
+                if (change > maxOf(DUST_SATS, dustFor(changeScript) - 1) && !noChangeOutput) {
                     outputs += com.kilombino.pyblockwatch.crypto.TxBuilder.Output(changeScript, change)
                 } else {
                     fee = sum - totalOut // dust (or unpriced) change folded into the fee
@@ -1959,7 +1974,8 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
         val perInput = when {
             _state.value.isHot -> 68.0
             store.scriptType == ScriptType.P2SH_P2WPKH -> 91.0
-            store.scriptType == ScriptType.P2TR -> 57.5
+            // Key-path signature plus the unified sighash byte the BLAKE2b chain requires (65 bytes).
+            store.scriptType == ScriptType.P2TR -> 57.75
             else -> 68.0
         }
         // A hot wallet's Taproot coins: key-path signature plus the unified sighash byte (57.75 vB).
@@ -2278,5 +2294,18 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
         /** Foreground auto-refresh cadence, and the countdown the UI shows. */
         /** Below this, a change output costs more to spend later than it is worth — fold it into fee. */
         const val DUST_SATS = 294L
+
     }
+}
+
+/**
+ * The smallest standard output for [script] (Bitcoin Core's dust limit at 3 sat/vB):
+ * 294 for bc1q, 330 for bc1p and P2WSH, 540 for P2SH, 546 for P2PKH. An output under
+ * it is refused by the network, so change below it goes to the fee instead.
+ */
+internal fun dustFor(script: ByteArray): Long = when {
+    script.size == 22 && script[0] == 0.toByte() -> 294L               // P2WPKH
+    script.size == 34 && (script[0] == 0x51.toByte() || script[0] == 0.toByte()) -> 330L // P2TR, P2WSH
+    script.size == 23 && script[0] == 0xa9.toByte() -> 540L            // P2SH
+    else -> 546L
 }
