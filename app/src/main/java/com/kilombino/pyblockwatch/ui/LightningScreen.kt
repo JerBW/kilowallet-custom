@@ -209,12 +209,12 @@ private fun LnNode(s: Lightning.Status.Running, accent: Color, settings: Boolean
     var selecting by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf<Set<String>>(emptySet()) }
     var showTx by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var bumping by remember { mutableStateOf<Pair<String, Long?>?>(null) }
+    bumping?.let { (txid, fee) -> SpeedUpTxDialog(txid, fee, accent) { bumping = null } }
     closing?.let { cs -> CloseChannelDialog(cs, accent, vm, onTx = { showTx = "Closing transaction" to it }) { closing = null; selecting = false; selected = emptySet() } }
     showTx?.let { (t, id) -> TxDialog(t, id, accent, vm, onSpeedUp = { bumping = id to null; showTx = null }) { showTx = null } }
     var speeding by remember { mutableStateOf<Lnd.Closing?>(null) }
     speeding?.let { c -> SpeedUpCloseDialog(c, accent) { speeding = null } }
-    var bumping by remember { mutableStateOf<Pair<String, Long?>?>(null) }
-    bumping?.let { (txid, fee) -> SpeedUpTxDialog(txid, fee, accent) { bumping = null } }
     var resizing by remember { mutableStateOf<Lnd.Channel?>(null) }
     resizing?.let { c -> ResizeChannelDialog(c, accent, vm, onTx = { showTx = "Resize transaction" to it }) { resizing = null } }
     val book = remember(s) { ledger(s) }
