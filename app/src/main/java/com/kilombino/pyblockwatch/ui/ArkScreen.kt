@@ -914,6 +914,8 @@ private fun ArkMovementDialog(m: Ark.Movement, accent: Color, explorer: String, 
                 }
                 if (m.vtxos.isNotEmpty() || m.paymentHash != null)
                     Text("Tap an identifier to copy it.", style = MaterialTheme.typography.bodySmall, color = TextFaint)
+                // Still in the mempool: the deposit can pay for it with a child (CPFP).
+                if (m.onchainTxid != null && m.confirmations == 0) ArkSpeedUp(m.onchainTxid, accent)
             }
         },
         confirmButton = {
@@ -924,6 +926,35 @@ private fun ArkMovementDialog(m: Ark.Movement, accent: Color, explorer: String, 
         dismissButton = { if (m.onchainTxid != null) TextButton(onClick = onClose) { Text("CLOSE", color = TextSoft) } },
         containerColor = PanelBg, titleContentColor = TextMain, textContentColor = TextSoft,
     )
+}
+
+/** SPEED UP for a deposit transaction still in the mempool: a child from the deposit's outputs of it pays for both. */
+@Composable
+private fun ArkSpeedUp(txid: String, accent: Color) {
+    val scope = rememberCoroutineScope()
+    var rateText by remember { mutableStateOf("3") }
+    val rate = rateText.replace(',', '.').toDoubleOrNull()?.takeIf { it in 0.1..10_000.0 }
+    var feeOk by remember { mutableStateOf(false) }
+    var busy by remember { mutableStateOf(false) }
+    var msg by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
+    Spacer(Modifier.height(6.dp))
+    Text("Waiting in the mempool. To speed it up, the deposit spends its own output of it with a second transaction " +
+        "whose fee pays for both, so miners take the two together.", style = MaterialTheme.typography.bodySmall, color = TextSoft)
+    OutlinedTextField(value = rateText, onValueChange = { t -> rateText = t.filter { it.isDigit() || it == '.' || it == ',' } },
+        label = { Text("Fee rate for both together (sat/vB)") }, singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), modifier = Modifier.fillMaxWidth())
+    val high = (rate ?: 0.0) > 100
+    if (high) FeeGate("This fee is high: $rateText sat/vB.", feeOk) { feeOk = !feeOk }
+    TextButton(enabled = !busy && rate != null && (!high || feeOk) && msg?.second != true, onClick = {
+        busy = true; msg = null
+        scope.launch {
+            runCatching { withContext(Dispatchers.IO) { Ark.speedUp(txid, rate!!) } }
+                .onSuccess { msg = "Sent: the second transaction pays ${groupSats(it)} sats for both." to true }
+                .onFailure { msg = (it.message ?: "could not speed it up") to false }
+            busy = false
+        }
+    }) { Text(if (busy) "SENDING…" else "SPEED UP", color = accent) }
+    msg?.let { (t, ok) -> Text(t, color = if (ok) Good else Bad, style = MaterialTheme.typography.bodySmall) }
 }
 
 /**

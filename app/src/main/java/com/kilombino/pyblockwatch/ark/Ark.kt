@@ -972,6 +972,17 @@ object Ark {
         val confirmations: Int? = null,
     )
 
+    /**
+     * Speeds up an unconfirmed transaction of the deposit (a move into Ark, a send from it, or a
+     * payment to it whose output the deposit holds): a child that spends the deposit's outputs of
+     * it, paying for both to reach [rate] sat/vB. Returns the child's fee in sats.
+     */
+    fun speedUp(txid: String, rate: Double): Long {
+        val r = JSONObject(call("POST", "/onchain/cpfp", JSONObject().put("txid", txid).put("fee_rate_sat_per_vb", rate), 120_000))
+        syncOnchain()
+        return r.optLong("fee_sat")
+    }
+
     /** Plain names for the engine's movement subsystems. */
     private fun kindLabel(subsystem: String): String = when (subsystem) {
         "bark.board" -> "move into Ark"

@@ -1961,5 +1961,7 @@
 "TAKE OUT": "取出",
 "Speed up the transaction": "加速交易",
 "The node has no unconfirmed coin from this transaction to speed it up with: it gave no change back to the node, or it already confirmed.": "节点没有来自此交易的未确认币可用于加速：它没有给节点找零，或者已经确认。",
-"The node spends its {0} sats of change from it with a second transaction whose fee pays for both, so miners take the two together.": "节点用第二笔交易花费其 {0} sats 找零，其手续费为两笔交易一起支付，矿工会把两笔一起打包。"
+"The node spends its {0} sats of change from it with a second transaction whose fee pays for both, so miners take the two together.": "节点用第二笔交易花费其 {0} sats 找零，其手续费为两笔交易一起支付，矿工会把两笔一起打包。",
+"Waiting in the mempool. To speed it up, the deposit spends its own output of it with a second transaction whose fee pays for both, so miners take the two together.": "正在内存池中等待。为加速，存款会用第二笔交易花费其自己的输出，其手续费为两笔一起支付，矿工会把两笔一起打包。",
+"Sent: the second transaction pays {0} sats for both.": "已发送：第二笔交易为两笔一起支付 {0} sats。"
 }

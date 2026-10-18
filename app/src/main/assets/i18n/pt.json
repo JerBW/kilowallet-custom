@@ -1973,5 +1973,7 @@
 "TAKE OUT": "TIRAR",
 "Speed up the transaction": "Acelerar a transação",
 "The node has no unconfirmed coin from this transaction to speed it up with: it gave no change back to the node, or it already confirmed.": "O nó não tem nenhuma moeda por confirmar desta transação com que a acelerar: não lhe devolveu troco, ou já está confirmada.",
-"The node spends its {0} sats of change from it with a second transaction whose fee pays for both, so miners take the two together.": "O nó gasta os seus {0} sats de troco com uma segunda transação cuja comissão paga pelas duas, e os mineiros levam as duas juntas."
+"The node spends its {0} sats of change from it with a second transaction whose fee pays for both, so miners take the two together.": "O nó gasta os seus {0} sats de troco com uma segunda transação cuja comissão paga pelas duas, e os mineiros levam as duas juntas.",
+"Waiting in the mempool. To speed it up, the deposit spends its own output of it with a second transaction whose fee pays for both, so miners take the two together.": "À espera na mempool. Para a acelerar, o depósito gasta a sua própria saída com uma segunda transação cuja comissão paga pelas duas, e os mineiros levam as duas juntas.",
+"Sent: the second transaction pays {0} sats for both.": "Enviada: a segunda transação paga {0} sats pelas duas."
 }
