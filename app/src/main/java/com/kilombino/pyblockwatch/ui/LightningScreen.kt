@@ -210,6 +210,8 @@ private fun LnNode(s: Lightning.Status.Running, accent: Color, settings: Boolean
     var showTx by remember { mutableStateOf<Pair<String, String>?>(null) }
     closing?.let { cs -> CloseChannelDialog(cs, accent, vm, onTx = { showTx = "Closing transaction" to it }) { closing = null; selecting = false; selected = emptySet() } }
     showTx?.let { (t, id) -> TxDialog(t, id, accent, vm) { showTx = null } }
+    var speeding by remember { mutableStateOf<Lnd.Closing?>(null) }
+    speeding?.let { c -> SpeedUpCloseDialog(c, accent) { speeding = null } }
     val book = remember(s) { ledger(s) }
     var sheet by remember { mutableStateOf(LnSheet.None) }
     val i = s.info
@@ -320,9 +322,17 @@ private fun LnNode(s: Lightning.Status.Running, accent: Color, settings: Boolean
             Spacer(Modifier.height(6.dp))
             Text(c.peer.take(16) + "…  " + street(groupSats(c.capacity)) + " sats", style = MaterialTheme.typography.bodySmall, color = TextMain)
             Text(c.note + " · yours " + street(groupSats(c.limbo)), style = MaterialTheme.typography.bodySmall, color = Warn)
-            if (c.txid.isNotEmpty()) TextButton(onClick = { showTx = "Closing transaction" to c.txid },
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)) {
-                Text("VIEW CLOSING TX", color = accent, style = MaterialTheme.typography.labelSmall)
+            if (c.txid.isNotEmpty()) Row {
+                TextButton(onClick = { showTx = "Closing transaction" to c.txid },
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)) {
+                    Text("VIEW CLOSING TX", color = accent, style = MaterialTheme.typography.labelSmall)
+                }
+                if (c.waiting) {
+                    Spacer(Modifier.width(16.dp))
+                    TextButton(onClick = { speeding = c }, contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)) {
+                        Text("SPEED UP", color = accent, style = MaterialTheme.typography.labelSmall)
+                    }
+                }
             }
         }
     }
@@ -1319,6 +1329,60 @@ private fun CloseChannelDialog(cs: List<Lnd.Channel>, accent: Color, vm: WalletV
             }) { Text(if (busy) "CLOSING…" else if (force) "FORCE CLOSE" else "CLOSE", color = if (force) Bad else accent) }
         },
         dismissButton = { if (msg?.second != true) TextButton(enabled = !busy, onClick = onDone) { Text("CANCEL") } })
+}
+
+/**
+ * Speeding up a cooperative close stuck on a low fee. It can't be replaced (both nodes signed
+ * it, and it doesn't signal RBF), so the node spends its own output of it with a child that
+ * pays for both (CPFP). A close paid to the BTC wallet is sped up from the BTC tab instead.
+ */
+@Composable
+private fun SpeedUpCloseDialog(c: Lnd.Closing, accent: Color, onDone: () -> Unit) {
+    val scope = rememberCoroutineScope()
+    var coin by remember { mutableStateOf<Lnd.CloseCoin?>(null) }
+    var looked by remember { mutableStateOf(false) }
+    LaunchedEffect(c.txid) {
+        coin = withContext(Dispatchers.IO) { runCatching { Lnd.unconfirmedCoinOf(c.txid) }.getOrNull() }
+        looked = true
+    }
+    var fee by remember { mutableStateOf("3") }
+    val rate = fee.toLongOrNull() ?: 0
+    var feeOk by remember { mutableStateOf(false) }
+    var busy by remember { mutableStateOf(false) }
+    var msg by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
+    AlertDialog(onDismissRequest = { if (!busy) onDone() },
+        title = { Text("Speed up the close") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                when {
+                    !looked -> Text("Looking for the node's coin in it…", style = MaterialTheme.typography.bodySmall)
+                    coin == null -> Text("This close doesn't pay the node's on-chain coins. If it pays your BTC wallet, speed it up there: " +
+                        "BTC tab, the incoming transaction, SPEED UP (CPFP).", style = MaterialTheme.typography.bodySmall)
+                    else -> {
+                        Text("A cooperative close can't be replaced: both nodes signed it. Instead the node spends its " +
+                            groupSats(coin!!.sats) + " sats from it with a second transaction whose fee pays for both, " +
+                            "so miners take the two together.", style = MaterialTheme.typography.bodySmall)
+                        OutlinedTextField(fee, { fee = it.filter(Char::isDigit) }, label = { Text("Fee rate for both together (sat/vB)") }, singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
+                        if (rate > HIGH_FEE_RATE) FeeGate("This fee is high: $rate sat/vB.", feeOk) { feeOk = !feeOk }
+                    }
+                }
+                msg?.let { (t, ok) -> Text(t, color = if (ok) Good else Bad, style = MaterialTheme.typography.bodySmall) }
+            }
+        },
+        confirmButton = {
+            if (msg?.second == true || coin == null) TextButton(onClick = onDone) { Text("OK", color = accent) }
+            else TextButton(enabled = !busy && rate >= 1 && (rate <= HIGH_FEE_RATE || feeOk), onClick = {
+                busy = true; msg = null
+                scope.launch {
+                    runCatching { withContext(Dispatchers.IO) { Lnd.speedUpClose(c.txid, c.capacity, rate) } }
+                        .onSuccess { child -> msg = "Sent: the second transaction pays $child sat/vB, both together about $rate." to true; Lightning.refresh() }
+                        .onFailure { msg = (it.message ?: "could not speed it up") to false }
+                    busy = false
+                }
+            }) { Text(if (busy) "SENDING…" else "SPEED UP", color = accent) }
+        },
+        dismissButton = { if (msg?.second != true && coin != null) TextButton(enabled = !busy, onClick = onDone) { Text("CANCEL") } })
 }
 
 /** A transaction of the node: its id to copy, and the explorer to look at it. */

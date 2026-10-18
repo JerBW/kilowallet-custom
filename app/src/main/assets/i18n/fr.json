@@ -1895,5 +1895,17 @@
 "🔑  sweep a private key into this wallet": "🔑  récupérer une clé privée dans ce portefeuille",
 "🔒 Private pool": "🔒 Pool privé",
 "🔔 Telegram alerts": "🔔 Alertes Telegram",
-"🔥 HOT": "🔥 CHAUD"
+"🔥 HOT": "🔥 CHAUD",
+"SPEED UP": "ACCÉLÉRER",
+"Speed up the close": "Accélérer la fermeture",
+"Looking for the node's coin in it…": "Recherche de la pièce du nœud…",
+"This close doesn't pay the node's on-chain coins. If it pays your BTC wallet, speed it up there: BTC tab, the incoming transaction, SPEED UP (CPFP).": "Cette fermeture ne paie pas les pièces on-chain du nœud. Si elle paie ton portefeuille BTC, accélère-la depuis là : onglet BTC, la transaction entrante, ACCÉLÉRER (CPFP).",
+"A cooperative close can't be replaced: both nodes signed it. Instead the node spends its {0} sats from it with a second transaction whose fee pays for both, so miners take the two together.": "Une fermeture coopérative ne peut pas être remplacée : les deux nœuds l'ont signée. Le nœud dépense plutôt ses {0} sats issus de celle-ci avec une seconde transaction dont les frais paient pour les deux, et les mineurs prennent les deux ensemble.",
+"Fee rate for both together (sat/vB)": "Taux de frais pour les deux ensemble (sat/vB)",
+"Sent: the second transaction pays {0} sat/vB, both together about {1}.": "Envoyée : la seconde transaction paie {0} sat/vB, les deux ensemble environ {1}.",
+"the node has no unconfirmed coin from this close (it may pay another wallet, or be confirmed)": "le nœud n'a aucune pièce non confirmée de cette fermeture (elle paie peut-être un autre portefeuille, ou est confirmée)",
+"the node does not know this transaction": "le nœud ne connaît pas cette transaction",
+"could not work out the close's fee": "impossible de calculer les frais de la fermeture",
+"that fee would take too much of the coin": "ces frais prendraient trop de la pièce",
+"could not speed it up": "impossible d'accélérer"
 }

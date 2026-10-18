@@ -238,13 +238,15 @@ object Lnd {
         }
 
     /** A channel being closed: [note] says how far (waiting for the close, or locked until a block). */
-    data class Closing(val peer: String, val capacity: Long, val limbo: Long, val note: String, val txid: String)
+    data class Closing(val peer: String, val capacity: Long, val limbo: Long, val note: String, val txid: String,
+                       /** A cooperative close waiting for its transaction: one that can be sped up. */
+                       val waiting: Boolean = false)
 
     suspend fun pendingClose(): List<Closing> {
         val m = call { Lndmobile.pendingChannels(ByteArray(0), it) }
         val waiting = m.msgs(5).map { w ->
             val ch = w.msg(1)
-            Closing(ch.string(1), ch.long(3), w.long(2), "closing · waiting for the closing transaction to confirm", w.string(4))
+            Closing(ch.string(1), ch.long(3), w.long(2), "closing · waiting for the closing transaction to confirm", w.string(4), waiting = true)
         }
         val forced = m.msgs(4).map { f ->
             val ch = f.msg(1)
@@ -253,6 +255,36 @@ object Lnd {
                 if (left > 0) "force closed · your sats unlock in $left blocks" else "force closed · sweeping your sats", f.string(2))
         }
         return waiting + forced
+    }
+
+    /** A coin of the node paid by [txid] and still unconfirmed: what a speed-up (CPFP) spends. */
+    data class CloseCoin(val txid: String, val index: Int, val sats: Long)
+
+    suspend fun unconfirmedCoinOf(txid: String): CloseCoin? =
+        call { Lndmobile.walletKitListUnspent(Pb().int(1, 0).int(2, 0).build(), it) }.msgs(1)
+            .map { u -> u to u.msg(5) }
+            .firstOrNull { (_, o) -> o.string(2) == txid }
+            ?.let { (u, o) -> CloseCoin(txid, o.int(3), u.long(3)) }
+
+    /**
+     * Speeds up a cooperative close that pays the node, by spending the node's output of it with
+     * a child (CPFP) whose fee lifts the two together to [targetRate] sat/vB. The close spends
+     * only the funding output, so its fee is [capacity] minus its outputs. The sweeper's budget
+     * is the child's fee, so it never pays more than this. Returns the child's fee rate.
+     */
+    suspend fun speedUpClose(txid: String, capacity: Long, targetRate: Long): Long {
+        val coin = unconfirmedCoinOf(txid) ?: throw LndError("the node has no unconfirmed coin from this close (it may pay another wallet, or be confirmed)")
+        val raw = call { Lndmobile.getTransactions(Pb().int(1, 0).int(2, -1).build(), it) }.msgs(1)
+            .firstOrNull { it.string(1) == txid }?.string(9) ?: throw LndError("the node does not know this transaction")
+        val parent = TxSize.of(raw)
+        val parentFee = capacity - parent.outputs
+        if (parentFee <= 0 || parentFee > capacity / 2) throw LndError("could not work out the close's fee")
+        val childRate = cpfpChildRate(targetRate, parent.vsize, parentFee, CPFP_CHILD_VSIZE)
+        val budget = childRate * CPFP_CHILD_VSIZE + 20
+        if (budget >= coin.sats / 2) throw LndError("that fee would take too much of the coin")
+        val out = Pb().bytes(1, txid.chunked(2).map { it.toInt(16).toByte() }.toByteArray().reversedArray()).int(3, coin.index)
+        call { Lndmobile.walletKitBumpFee(Pb().msg(1, out).int(5, childRate).bool(6, true).int(7, budget).build(), it) }
+        return childRate
     }
 
     data class PayReq(val destination: String, val hash: String, val sats: Long, val description: String, val expiry: Long, val timestamp: Long,

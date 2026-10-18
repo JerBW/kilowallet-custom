@@ -1883,5 +1883,17 @@
 "🔑  sweep a private key into this wallet": "🔑  将私钥扫入此钱包",
 "🔒 Private pool": "🔒 私有池",
 "🔔 Telegram alerts": "🔔 Telegram 提醒",
-"🔥 HOT": "🔥 热"
+"🔥 HOT": "🔥 热",
+"SPEED UP": "加速",
+"Speed up the close": "加速关闭",
+"Looking for the node's coin in it…": "正在查找节点在其中的币…",
+"This close doesn't pay the node's on-chain coins. If it pays your BTC wallet, speed it up there: BTC tab, the incoming transaction, SPEED UP (CPFP).": "此关闭交易不付给节点的链上币。如果它付给你的 BTC 钱包，请在那里加速：BTC 标签页，收到的交易，加速 (CPFP)。",
+"A cooperative close can't be replaced: both nodes signed it. Instead the node spends its {0} sats from it with a second transaction whose fee pays for both, so miners take the two together.": "合作关闭交易无法替换：两个节点都已签名。节点会用第二笔交易花费其中属于它的 {0} sats，这笔交易的手续费为两笔一起支付，矿工会把两笔一起打包。",
+"Fee rate for both together (sat/vB)": "两笔合计的费率 (sat/vB)",
+"Sent: the second transaction pays {0} sat/vB, both together about {1}.": "已发送：第二笔交易支付 {0} sat/vB，两笔合计约 {1}。",
+"the node has no unconfirmed coin from this close (it may pay another wallet, or be confirmed)": "节点没有来自此关闭交易的未确认币（可能付给了另一个钱包，或已确认）",
+"the node does not know this transaction": "节点不知道这笔交易",
+"could not work out the close's fee": "无法算出关闭交易的手续费",
+"that fee would take too much of the coin": "该手续费会占用该币过多",
+"could not speed it up": "无法加速"
 }

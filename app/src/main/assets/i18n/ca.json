@@ -1895,5 +1895,17 @@
 "🔑  sweep a private key into this wallet": "🔑  escombra una clau privada a aquest moneder",
 "🔒 Private pool": "🔒 Pool privat",
 "🔔 Telegram alerts": "🔔 Avisos per Telegram",
-"🔥 HOT": "🔥 CALENT"
+"🔥 HOT": "🔥 CALENT",
+"SPEED UP": "ACCELERA",
+"Speed up the close": "Accelera el tancament",
+"Looking for the node's coin in it…": "Buscant la moneda del node…",
+"This close doesn't pay the node's on-chain coins. If it pays your BTC wallet, speed it up there: BTC tab, the incoming transaction, SPEED UP (CPFP).": "Aquest tancament no paga a les monedes on-chain del node. Si paga a la teva cartera BTC, accelera'l des d'allà: pestanya BTC, la transacció entrant, ACCELERA (CPFP).",
+"A cooperative close can't be replaced: both nodes signed it. Instead the node spends its {0} sats from it with a second transaction whose fee pays for both, so miners take the two together.": "Un tancament cooperatiu no es pot substituir: el van signar els dos nodes. En canvi, el node gasta els seus {0} sats d'aquest amb una segona transacció la comissió de la qual paga per totes dues, i els miners s'emporten les dues juntes.",
+"Fee rate for both together (sat/vB)": "Comissió per a les dues juntes (sat/vB)",
+"Sent: the second transaction pays {0} sat/vB, both together about {1}.": "Enviada: la segona transacció paga {0} sat/vB; les dues juntes, uns {1}.",
+"the node has no unconfirmed coin from this close (it may pay another wallet, or be confirmed)": "el node no té cap moneda sense confirmar d'aquest tancament (potser paga a una altra cartera, o ja està confirmat)",
+"the node does not know this transaction": "el node no coneix aquesta transacció",
+"could not work out the close's fee": "no s'ha pogut calcular la comissió del tancament",
+"that fee would take too much of the coin": "aquesta comissió s'enduria massa de la moneda",
+"could not speed it up": "no s'ha pogut accelerar"
 }

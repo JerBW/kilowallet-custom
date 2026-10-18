@@ -1895,5 +1895,17 @@
 "🔑  sweep a private key into this wallet": "🔑  varrer uma chave privada para esta carteira",
 "🔒 Private pool": "🔒 Pool privada",
 "🔔 Telegram alerts": "🔔 Avisos pelo Telegram",
-"🔥 HOT": "🔥 QUENTE"
+"🔥 HOT": "🔥 QUENTE",
+"SPEED UP": "ACELERAR",
+"Speed up the close": "Acelerar o fecho",
+"Looking for the node's coin in it…": "A procurar a moeda do nó…",
+"This close doesn't pay the node's on-chain coins. If it pays your BTC wallet, speed it up there: BTC tab, the incoming transaction, SPEED UP (CPFP).": "Este fecho não paga às moedas on-chain do nó. Se paga à tua carteira BTC, acelera a partir de lá: separador BTC, a transação recebida, ACELERAR (CPFP).",
+"A cooperative close can't be replaced: both nodes signed it. Instead the node spends its {0} sats from it with a second transaction whose fee pays for both, so miners take the two together.": "Um fecho cooperativo não pode ser substituído: os dois nós assinaram-no. Em vez disso, o nó gasta os seus {0} sats dele com uma segunda transação cuja taxa paga pelas duas, e os mineiros levam as duas juntas.",
+"Fee rate for both together (sat/vB)": "Taxa para as duas juntas (sat/vB)",
+"Sent: the second transaction pays {0} sat/vB, both together about {1}.": "Enviada: a segunda transação paga {0} sat/vB; as duas juntas, cerca de {1}.",
+"the node has no unconfirmed coin from this close (it may pay another wallet, or be confirmed)": "o nó não tem nenhuma moeda não confirmada deste fecho (talvez pague a outra carteira, ou já esteja confirmado)",
+"the node does not know this transaction": "o nó não conhece esta transação",
+"could not work out the close's fee": "não foi possível calcular a taxa do fecho",
+"that fee would take too much of the coin": "essa taxa levaria demasiado da moeda",
+"could not speed it up": "não foi possível acelerar"
 }

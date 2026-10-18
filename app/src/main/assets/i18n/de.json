@@ -1895,5 +1895,17 @@
 "🔑  sweep a private key into this wallet": "🔑  privaten Schlüssel in dieses Wallet einsammeln",
 "🔒 Private pool": "🔒 Privater Pool",
 "🔔 Telegram alerts": "🔔 Telegram-Benachrichtigungen",
-"🔥 HOT": "🔥 HOT"
+"🔥 HOT": "🔥 HOT",
+"SPEED UP": "BESCHLEUNIGEN",
+"Speed up the close": "Schließung beschleunigen",
+"Looking for the node's coin in it…": "Suche die Münze des Knotens darin…",
+"This close doesn't pay the node's on-chain coins. If it pays your BTC wallet, speed it up there: BTC tab, the incoming transaction, SPEED UP (CPFP).": "Diese Schließung zahlt nicht an die On-Chain-Münzen des Knotens. Zahlt sie an deine BTC-Wallet, beschleunige sie dort: Tab BTC, die eingehende Transaktion, BESCHLEUNIGEN (CPFP).",
+"A cooperative close can't be replaced: both nodes signed it. Instead the node spends its {0} sats from it with a second transaction whose fee pays for both, so miners take the two together.": "Eine kooperative Schließung lässt sich nicht ersetzen: beide Knoten haben sie signiert. Stattdessen gibt der Knoten seine {0} sats daraus mit einer zweiten Transaktion aus, deren Gebühr für beide zahlt, sodass Miner beide zusammen aufnehmen.",
+"Fee rate for both together (sat/vB)": "Gebührenrate für beide zusammen (sat/vB)",
+"Sent: the second transaction pays {0} sat/vB, both together about {1}.": "Gesendet: die zweite Transaktion zahlt {0} sat/vB, beide zusammen etwa {1}.",
+"the node has no unconfirmed coin from this close (it may pay another wallet, or be confirmed)": "der Knoten hat keine unbestätigte Münze aus dieser Schließung (sie zahlt vielleicht an eine andere Wallet oder ist bestätigt)",
+"the node does not know this transaction": "der Knoten kennt diese Transaktion nicht",
+"could not work out the close's fee": "die Gebühr der Schließung ließ sich nicht ermitteln",
+"that fee would take too much of the coin": "diese Gebühr würde zu viel von der Münze nehmen",
+"could not speed it up": "konnte nicht beschleunigt werden"
 }
