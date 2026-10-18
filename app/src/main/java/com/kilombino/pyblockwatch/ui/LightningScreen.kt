@@ -492,9 +492,13 @@ private fun OpenSheet(accent: Color, onchain: Long, onTx: (String) -> Unit, onDo
         OutlinedTextField(fee, { fee = it.filter(Char::isDigit) }, label = { Text("Fee rate (sat/vB)") }, singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
         Explain("Minimum 20,000 sats. Leave some sats on-chain: closing and fee bumps need them. The channel is private: it is not announced and nobody routes other people's payments through your phone.")
+        // A fee rate that looks like a slip needs a second yes, as in the wallet's own sends.
+        val openRate = fee.toLongOrNull() ?: 1
+        var openFeeOk by remember { mutableStateOf(false) }
+        if (openRate > HIGH_FEE_RATE) FeeGate("This fee is high: $openRate sat/vB.", openFeeOk) { openFeeOk = !openFeeOk }
         Spacer(Modifier.height(6.dp))
         val useAll = chosen.isNotEmpty() && amount.isBlank()
-        Button(enabled = !busy && ((amount.toLongOrNull() ?: 0) >= 20_000 || (useAll && chosen.sumOf { it.sats } > 20_000)), modifier = Modifier.fillMaxWidth(),
+        Button(enabled = !busy && (openRate <= HIGH_FEE_RATE || openFeeOk) && ((amount.toLongOrNull() ?: 0) >= 20_000 || (useAll && chosen.sumOf { it.sats } > 20_000)), modifier = Modifier.fillMaxWidth(),
             colors = ButtonDefaults.buttonColors(containerColor = accent), onClick = {
                 busy = true; msg = null
                 scope.launch {
@@ -851,15 +855,18 @@ private fun PayOnchain(accent: Color, scanned: String?, onTx: (String) -> Unit) 
             onClick = { confirm = true }) { Text(if (busy) "SENDING…" else "SEND") }
         msg?.let { (t, ok) -> Text(t, color = if (ok) Good else Bad, style = MaterialTheme.typography.bodySmall) }
     }
-    if (confirm) AlertDialog(onDismissRequest = { confirm = false },
+    val sendRate = fee.toLongOrNull() ?: 1
+    var sendFeeOk by remember { mutableStateOf(false) }
+    if (confirm) AlertDialog(onDismissRequest = { confirm = false; sendFeeOk = false },
         title = { Text(if (all) "Send everything ticked?" else "Send ${groupSats(amount.toLongOrNull() ?: 0)} sats?") },
         text = {
             Text("From ${chosen.size} coin(s) (${groupSats(total)} sats) of the Lightning node to ${address.take(14)}…${address.takeLast(6)} at " +
                 "${fee.ifBlank { "1" }} sat/vB." + (if (all) " The fee comes out of the amount." else ""),
                 style = MaterialTheme.typography.bodySmall)
+            if (sendRate > HIGH_FEE_RATE) Column { FeeGate("This fee is high: $sendRate sat/vB.", sendFeeOk) { sendFeeOk = !sendFeeOk } }
         },
         confirmButton = {
-            TextButton(onClick = {
+            TextButton(enabled = sendRate <= HIGH_FEE_RATE || sendFeeOk, onClick = {
                 confirm = false; busy = true; msg = null
                 scope.launch {
                     runCatching {
@@ -1228,6 +1235,8 @@ private fun CloseChannelDialog(cs: List<Lnd.Channel>, accent: Color, vm: WalletV
     var dest by remember { mutableStateOf(if (btc != null) 0 else 1) }   // 0 BTC wallet, 1 node, 2 pasted
     var pasted by remember { mutableStateOf("") }
     var fee by remember { mutableStateOf("1") }
+    val closeRate = fee.toLongOrNull() ?: 1
+    var closeFeeOk by remember { mutableStateOf(false) }
     var force by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var msg by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
@@ -1256,6 +1265,7 @@ private fun CloseChannelDialog(cs: List<Lnd.Channel>, accent: Color, vm: WalletV
                         label = { Text("bc1…") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                     OutlinedTextField(fee, { fee = it.filter(Char::isDigit) }, label = { Text("Fee rate (sat/vB)") }, singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
+                    if (closeRate > HIGH_FEE_RATE) FeeGate("This fee is high: $closeRate sat/vB.", closeFeeOk) { closeFeeOk = !closeFeeOk }
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     androidx.compose.material3.Checkbox(checked = force, onCheckedChange = { force = it })
@@ -1268,7 +1278,7 @@ private fun CloseChannelDialog(cs: List<Lnd.Channel>, accent: Color, vm: WalletV
         },
         confirmButton = {
             if (msg?.second == true) TextButton(onClick = onDone) { Text("OK", color = accent) }
-            else TextButton(enabled = !busy && (force || dest != 2 || pasted.length > 20), onClick = {
+            else TextButton(enabled = !busy && (force || dest != 2 || pasted.length > 20) && (force || closeRate <= HIGH_FEE_RATE || closeFeeOk), onClick = {
                 busy = true; msg = null
                 val to = when { force -> null; dest == 0 -> btc; dest == 2 -> pasted; else -> null }
                 scope.launch {
@@ -1322,6 +1332,9 @@ private fun TxDialog(title: String, txid: String, accent: Color, vm: WalletViewM
             }
         })
 }
+
+/** An on-chain fee rate above this (sat/vB) looks like a slip: it needs a second yes (see FeeGate). */
+private const val HIGH_FEE_RATE = 100L
 
 /** How much a Lightning payment may cost in routing fees, at most. */
 @Composable
@@ -1470,7 +1483,11 @@ private fun InboundPanel(accent: Color, s: Lightning.Status.Running, onTx: (Stri
                     quote = null; orderId = q.id; status = "Paying the fee and waiting for the channel…"
                     scope.launch {
                         // The payment only completes once the channel is out (hold invoice).
-                        runCatching { withContext(Dispatchers.IO) { Lnd.pay(q.invoice, Lightning.feeLimit(ctx, q.fee), 120) } }
+                        runCatching { withContext(Dispatchers.IO) {
+                            // Checked on this phone's node before a sat leaves: Kilombino's node, the fee shown, the size asked.
+                            Inbound.mismatch(q, millions * 1_000_000L, info?.feePerMillion ?: -1)?.let { throw IllegalStateException("not paid: $it") }
+                            Lnd.pay(q.invoice, Lightning.feeLimit(ctx, q.fee), 120)
+                        } }
                             .onFailure { e -> if (orderId != null) { err = "The fee was not paid: " + (e.message ?: "failed"); status = null } }
                     }
                 }) { Text("PAY AND OPEN", color = accent) }

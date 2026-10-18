@@ -50,6 +50,28 @@ object Inbound {
         return Quote(o.getString("id"), o.getString("invoice"), o.getLong("fee"), o.getLong("sats"), o.getLong("expires"))
     }
 
+    /**
+     * Why the quote's invoice must not be paid, or null when it is the one the user agreed to:
+     * decoded on this phone's own node, it must pay Kilombino's node on this chain, ask for
+     * exactly the fee shown (the service's rate for the size asked), for the size asked, and
+     * still have time left.
+     */
+    suspend fun mismatch(q: Quote, askedSats: Long, feePerMillion: Long): String? {
+        val r = Lnd.decode(q.invoice)
+        val fee = feePerMillion * (askedSats / 1_000_000)
+        val now = System.currentTimeMillis() / 1000
+        return when {
+            r.destination != Lightning.KILOMBINO_NODE -> "the invoice pays another node"
+            !r.blake2b -> "the invoice is not a BTC invoice"
+            q.sats != askedSats -> "the offer is for another channel size"
+            q.fee != fee || r.msat != fee * 1000 -> "the invoice asks for another fee (${(r.msat + 999) / 1000} sats, not $fee)"
+            r.timestamp + r.expiry - now < 30 -> "the offer has expired: ask again"
+            // The fee is held until the channel is out: never for longer than two weeks of blocks.
+            r.cltv > Bridge.MAX_HOLD_CLTV -> "the invoice could hold the fee too long (${r.cltv} blocks)"
+            else -> null
+        }
+    }
+
     fun order(id: String): Order = http("GET", "/order/$id").let {
         Order(it.getString("status"), it.optString("fundingTxid").takeIf { t -> t.length == 64 }, if (it.isNull("reason")) null else it.optString("reason").ifBlank { null })
     }

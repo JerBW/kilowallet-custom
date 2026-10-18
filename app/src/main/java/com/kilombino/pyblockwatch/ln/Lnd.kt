@@ -259,7 +259,9 @@ object Lnd {
                       /** Sets option_blake2b (feature 512 or 513): an invoice of this chain, not of the SHA-256 one. */
                       val blake2b: Boolean = true,
                       /** The exact amount, in millisatoshis (num_msat). */
-                      val msat: Long = sats * 1000)
+                      val msat: Long = sats * 1000,
+                      /** Blocks the payee asks for its own timelock (cltv_expiry): how long a held payment can stay held. */
+                      val cltv: Long = 18)
 
     suspend fun decode(invoice: String): PayReq {
         val m = call { Lndmobile.decodePayReq(Pb().string(1, invoice.trim()).build(), it) }
@@ -267,7 +269,7 @@ object Lnd {
         val bits = m.msgs(13).map { it.long(1) }.toSet()
         // num_msat (12): the bridge's hold invoices are not whole sats.
         return PayReq(m.string(1), m.string(2), m.long(3), m.string(6), m.long(5), m.long(4),
-            blake2b = 512L in bits || 513L in bits, msat = m.long(12))
+            blake2b = 512L in bits || 513L in bits, msat = m.long(12), cltv = m.long(9))
     }
 
     /** What a payment error means to someone paying, when the node's own words would not say. */
