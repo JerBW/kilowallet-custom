@@ -1369,8 +1369,8 @@ private fun FeeLimitPanel(accent: Color) {
                 }
             }
         }
-        OutlinedTextField(min, { v -> min = v.filter(Char::isDigit); Lightning.setFeeLimit(ctx, pct, min.toLongOrNull() ?: 0L) },
-            label = { Text("Minimum (sats)") }, singleLine = true,
+        OutlinedTextField(min, { v -> min = v.filter(Char::isDigit).take(5); Lightning.setFeeLimit(ctx, pct, min.toLongOrNull() ?: 0L) },
+            label = { Text("Minimum (sats, up to ${Lightning.MAX_FEE_MIN})") }, singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
     }
 }
@@ -1499,7 +1499,7 @@ private fun InboundPanel(accent: Color, s: Lightning.Status.Running, onTx: (Stri
                         // The payment only completes once the channel is out (hold invoice).
                         runCatching { withContext(Dispatchers.IO) {
                             // Checked on this phone's node before a sat leaves: Kilombino's node, the fee shown, the size asked.
-                            Inbound.mismatch(q, millions * 1_000_000L, info?.feePerMillion ?: -1)?.let { throw IllegalStateException("not paid: $it") }
+                            Inbound.mismatch(q, millions * 1_000_000L, info?.feePerMillion ?: -1)?.let { throw IllegalStateException(it) }
                             Lnd.pay(q.invoice, Lightning.feeLimit(ctx, q.fee), 120)
                         } }
                             .onFailure { e -> if (orderId != null) { err = "The fee was not paid: " + (e.message ?: "failed"); status = null } }

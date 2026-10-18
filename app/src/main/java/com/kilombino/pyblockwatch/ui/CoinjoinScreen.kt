@@ -299,7 +299,10 @@ fun CoinjoinScreen(vm: WalletViewModel, accent: Color) {
             "exactly the pool's amount, all identical, so nobody watching the chain can tell whose is whose. " +
             "A pool is either native SegWit (bc1q) or Taproot (bc1p), never both, so no coin stands out. " +
             "Each person pays their own share of the fee from their change. No server ever holds your " +
-            "coins: the relay only passes encrypted messages, and you sign only after checking your output.")
+            "coins: the relay only passes encrypted messages, and you sign only after checking your output." +
+            "\n\nWhat it does not hide: the relay sees which connection sends what (over Tor only when Tor is already on), " +
+            "and the members of a round can read each other's messages. The relay's operator together with one member " +
+            "could tell whose output is whose. Kilojoin v3 will close that.")
     }
 
     // How rounds run (on its own or asking), and room to run in the background, in sight.
@@ -310,8 +313,8 @@ fun CoinjoinScreen(vm: WalletViewModel, accent: Color) {
         SectionLabel("How a round goes", accent)
         Spacer(Modifier.height(8.dp))
         Explain("1. Someone opens a pool with an amount and an address type. 2. People join, each proving they own " +
-            "real coins of that type (one seat per person, and a coin can hold only one seat, which stops one person " +
-            "from filling the pool alone). 3. With two or more in, " +
+            "real coins of that type (one seat per coin: a coin can't sit twice, but one person with several coins can take " +
+            "several seats, so the others in a pool are not proven to be other people). 3. With two or more in, " +
             "anyone can ask to close: the others accept or refuse; whoever does not answer in " +
             "${Protocol.VOTE_SECONDS / 60} minutes is left out. 4. Each wallet posts its mixed output with no name " +
             "on it, after a random wait. 5. Every wallet builds the same transaction, checks its own output and " +
@@ -767,7 +770,8 @@ internal fun CoinjoinAutoSetting(accent: Color) {
                 Text("Run the round on its own", style = MaterialTheme.typography.bodyMedium, color = TextMain)
                 Explain(if (on) "One fingerprint when you join; then it accepts closing and signs by itself, only " +
                     "if the transaction pays your exact output and change. It carries on after the app is closed and opened again: " +
-                    "the keys of the round's coins are kept encrypted on this phone until the round ends."
+                    "the keys of the round's coins are kept encrypted on this phone until the round ends." +
+                    "\n\nThey work without your fingerprint while the round runs: that is what lets it sign alone."
                     else "Off: you accept closing and sign yourself, with your fingerprint, at each step.")
             }
             // Turning it on also asks Android to let the wallet run in the background, which a
@@ -1016,12 +1020,10 @@ private fun TelegramAlertsPanel(accent: Color, mine: List<com.kilombino.pyblockw
                     "step by step: someone joined or left, someone asks to close, your turn to sign, sent, confirmed, cancelled.",
                     style = MaterialTheme.typography.bodySmall)
                 Text("⚠ Privacy: to do it, the bot's server learns that your Telegram account is in those pools " +
-                    "(and Telegram sees the messages). It never learns which mixed output is yours, it forgets each pool " +
-                    "when it ends, and it talks to this app " +
-                    (if (com.kilombino.pyblockwatch.chain.Tor.available) "over Tor only (an alert waits rather than go over the clear net). "
-                     else "over https from your IP: this phone has no Tor. ") +
-                    "If that is too much, leave this off: the " +
-                    "app's own notifications already tell you everything.",
+                    "(and Telegram sees the messages). It never learns which mixed output is yours, it talks to this " +
+                    "app over Tor, and it forgets each pool when it ends. If that is too much, leave this off: the " +
+                    "app's own notifications already tell you everything." +
+                    (if (com.kilombino.pyblockwatch.chain.Tor.available) "" else "\n\nThis phone has no Tor: the alerts go to the bot's server over https, from your IP."),
                     style = MaterialTheme.typography.bodySmall, color = Warn)
             }
         },

@@ -255,8 +255,9 @@ class MainActivity : FragmentActivity() {
                             text = {
                                 Column {
                                     Text("The last time, the app closed on an error. The report says where in the code it " +
-                                        "failed, the app version and the phone model; no words, keys or addresses, and server names are " +
-                                        "blanked out. Read it below. Share it with the developer to get it fixed? Nothing is sent unless you do.",
+                                        "failed, the app version and the phone model; no words, keys or addresses. Share it with the " +
+                                        "developer to get it fixed? Nothing is sent unless you do." +
+                                        "\n\nServer names are blanked out. This is exactly what would be shared:",
                                         style = MaterialTheme.typography.bodySmall)
                                     Spacer(Modifier.height(8.dp))
                                     // The exact text that would be shared.

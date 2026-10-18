@@ -173,13 +173,15 @@ object Lightning {
     /** The routing fee a payment may cost at most: [feePercent] of it, never under [feeMinSats]. */
     fun feeLimit(ctx: Context, sats: Long): Long {
         val p = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        val pct = p.getFloat("fee_pct", 1f); val min = p.getLong("fee_min", 10L)
+        val pct = p.getFloat("fee_pct", 1f); val min = p.getLong("fee_min", 10L).coerceIn(0, MAX_FEE_MIN)
         return maxOf(min, (sats * pct / 100.0).toLong())
     }
     fun feePercent(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getFloat("fee_pct", 1f)
     fun feeMinSats(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getLong("fee_min", 10L)
+    /** The highest "at least" a user can set: a larger minimum would take the cap away for small payments. */
+    const val MAX_FEE_MIN = 1_000L
     fun setFeeLimit(ctx: Context, pct: Float, min: Long) =
-        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putFloat("fee_pct", pct).putLong("fee_min", min).apply()
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putFloat("fee_pct", pct).putLong("fee_min", min.coerceIn(0, MAX_FEE_MIN)).apply()
 
     /** Stops and deletes an empty node (the screen checks it holds nothing). */
     suspend fun deleteNode(ctx: Context) {
