@@ -303,9 +303,11 @@ fun CoinjoinScreen(vm: WalletViewModel, accent: Color) {
             "A pool is either native SegWit (bc1q) or Taproot (bc1p), never both, so no coin stands out. " +
             "Each person pays their own share of the fee from their change. No server ever holds your " +
             "coins: the relay only passes encrypted messages, and you sign only after checking your output." +
-            "\n\nWhat it does not hide: the relay sees which connection sends what (over Tor only when Tor is already on), " +
-            "and the members of a round can read each other's messages. The relay's operator together with one member " +
-            "could tell whose output is whose. Kilojoin v3 will close that.")
+            "\n\nPools marked \"blind outputs\" (Kilojoin v3, every pool this version opens): each output is signed blindly " +
+            "by the pool's creator and handed in from a fresh key over a connection of its own, so neither the relay, nor the other " +
+            "members, nor the creator can tell whose output is whose, and only the creator's own key runs the pool. In older pools " +
+            "the relay's operator together with one member could tell. Either way the relay sees which connection sends what " +
+            "(over Tor only when Tor is already on).")
     }
 
     // How rounds run (on its own or asking), and room to run in the background, in sight.
@@ -342,7 +344,8 @@ private fun poolKind(t: Protocol.Terms): String = if (t.script == ScriptType.P2T
 /** What kind of pool it is, in one line. */
 private fun poolTypeLine(t: Protocol.Terms): String =
     (if (t.script == ScriptType.P2TR) "Taproot (bc1p) coins only" else "Native SegWit (bc1q) coins only") +
-        (if (t.maxInputs > 1) " · up to ${t.maxInputs} coins each" else " · one coin each")
+        (if (t.maxInputs > 1) " · up to ${t.maxInputs} coins each" else " · one coin each") +
+        (if (t.v3) " · blind outputs (v3)" else "")
 
 private fun unlockAndPick(
     activity: FragmentActivity, vm: WalletViewModel, u: List<Scanner.SpendableUtxo>, title: String, subtitle: String,

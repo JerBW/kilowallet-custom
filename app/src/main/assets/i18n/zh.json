@@ -1923,5 +1923,7 @@
 "Hashrate rental prices, on MiningRigRentals": "算力租赁价格，在 MiningRigRentals",
 "YSH, the explorer's tool": "YSH，区块浏览器的工具",
 "A withdrawal from Ark leaves in the server's next round: its network fee is the round's, shown in the cost.": "从 Ark 提取会在服务器的下一轮中发出：其网络费用由该轮决定，显示在费用中。",
-"Choose a network fee (sat/vB, at least 0.1).": "请选择网络费用（sat/vB，至少 0.1）。"
+"Choose a network fee (sat/vB, at least 0.1).": "请选择网络费用（sat/vB，至少 0.1）。",
+"Pools marked \"blind outputs\" (Kilojoin v3, every pool this version opens): each output is signed blindly by the pool's creator and handed in from a fresh key over a connection of its own, so neither the relay, nor the other members, nor the creator can tell whose output is whose, and only the creator's own key runs the pool. In older pools the relay's operator together with one member could tell. Either way the relay sees which connection sends what (over Tor only when Tor is already on).": "标记为“盲输出”的池（Kilojoin v3，本版本开设的所有池）：池的创建者对每个输出进行盲签名，每个人再用新密钥、通过单独的连接提交输出，因此中继、其他成员乃至创建者都无法分辨哪个输出属于谁，并且只有创建者自己的密钥能管理该池。在旧池中，中继运营者与一名成员联手就能分辨。无论哪种池，中继都能看到哪个连接发送了什么（仅当 Tor 已开启时才经由 Tor）。",
+"blind outputs (v3)": "盲输出（v3）"
 }

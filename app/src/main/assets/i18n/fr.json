@@ -1935,5 +1935,7 @@
 "Hashrate rental prices, on MiningRigRentals": "Prix de location de hashrate, sur MiningRigRentals",
 "YSH, the explorer's tool": "YSH, l'outil de l'explorateur",
 "A withdrawal from Ark leaves in the server's next round: its network fee is the round's, shown in the cost.": "Un retrait d'Ark part dans le prochain tour du serveur : ses frais de réseau sont ceux du tour, affichés dans le coût.",
-"Choose a network fee (sat/vB, at least 0.1).": "Choisis des frais de réseau (sat/vB, au moins 0,1)."
+"Choose a network fee (sat/vB, at least 0.1).": "Choisis des frais de réseau (sat/vB, au moins 0,1).",
+"Pools marked \"blind outputs\" (Kilojoin v3, every pool this version opens): each output is signed blindly by the pool's creator and handed in from a fresh key over a connection of its own, so neither the relay, nor the other members, nor the creator can tell whose output is whose, and only the creator's own key runs the pool. In older pools the relay's operator together with one member could tell. Either way the relay sees which connection sends what (over Tor only when Tor is already on).": "Pools marqués « sorties à l'aveugle » (Kilojoin v3, tous ceux qu'ouvre cette version) : le créateur du pool signe chaque sortie à l'aveugle et chacun la remet depuis une nouvelle clé, par une connexion à part ; ni le relais, ni les autres membres, ni le créateur ne peuvent savoir à qui est chaque sortie, et seule la clé propre du créateur dirige le pool. Dans les anciens pools, l'opérateur du relais avec un membre pourrait le savoir. Dans tous, le relais voit quelle connexion envoie quoi (par Tor seulement si Tor est déjà lancé).",
+"blind outputs (v3)": "sorties à l'aveugle (v3)"
 }

@@ -1935,5 +1935,7 @@
 "Hashrate rental prices, on MiningRigRentals": "Mietpreise für Hashrate, auf MiningRigRentals",
 "YSH, the explorer's tool": "YSH, das Werkzeug des Explorers",
 "A withdrawal from Ark leaves in the server's next round: its network fee is the round's, shown in the cost.": "Eine Auszahlung aus Ark geht in der nächsten Runde des Servers hinaus: Ihre Netzwerkgebühr ist die der Runde und steht in den Kosten.",
-"Choose a network fee (sat/vB, at least 0.1).": "Wähle eine Netzwerkgebühr (sat/vB, mindestens 0,1)."
+"Choose a network fee (sat/vB, at least 0.1).": "Wähle eine Netzwerkgebühr (sat/vB, mindestens 0,1).",
+"Pools marked \"blind outputs\" (Kilojoin v3, every pool this version opens): each output is signed blindly by the pool's creator and handed in from a fresh key over a connection of its own, so neither the relay, nor the other members, nor the creator can tell whose output is whose, and only the creator's own key runs the pool. In older pools the relay's operator together with one member could tell. Either way the relay sees which connection sends what (over Tor only when Tor is already on).": "Pools mit \"blinde Ausgaben\" (Kilojoin v3, alle Pools, die diese Version eröffnet): Der Ersteller signiert jede Ausgabe blind, und jeder reicht sie mit einem neuen Schlüssel über eine eigene Verbindung ein. So kann weder das Relay noch ein anderes Mitglied noch der Ersteller sagen, welche Ausgabe wem gehört, und nur der eigene Schlüssel des Erstellers lenkt den Pool. In älteren Pools könnte der Betreiber des Relays zusammen mit einem Mitglied es herausfinden. In allen sieht das Relay, welche Verbindung was sendet (über Tor nur, wenn Tor schon läuft).",
+"blind outputs (v3)": "blinde Ausgaben (v3)"
 }

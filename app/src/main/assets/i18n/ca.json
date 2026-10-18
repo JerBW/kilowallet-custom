@@ -1935,5 +1935,7 @@
 "Hashrate rental prices, on MiningRigRentals": "Preus de lloguer de hashrate, a MiningRigRentals",
 "YSH, the explorer's tool": "YSH, l'eina de l'explorador",
 "A withdrawal from Ark leaves in the server's next round: its network fee is the round's, shown in the cost.": "Una retirada d'Ark surt a la següent ronda del servidor: la seva comissió de xarxa és la de la ronda, i es veu al cost.",
-"Choose a network fee (sat/vB, at least 0.1).": "Tria una comissió de xarxa (sat/vB, com a mínim 0,1)."
+"Choose a network fee (sat/vB, at least 0.1).": "Tria una comissió de xarxa (sat/vB, com a mínim 0,1).",
+"Pools marked \"blind outputs\" (Kilojoin v3, every pool this version opens): each output is signed blindly by the pool's creator and handed in from a fresh key over a connection of its own, so neither the relay, nor the other members, nor the creator can tell whose output is whose, and only the creator's own key runs the pool. In older pools the relay's operator together with one member could tell. Either way the relay sees which connection sends what (over Tor only when Tor is already on).": "Pools marcats \"sortides a cegues\" (Kilojoin v3, tots els que obre aquesta versió): el creador del pool signa cada sortida a cegues i cadascú la lliura des d'una clau nova i per una connexió a part, així que ni el relay, ni els altres membres, ni el creador poden saber de qui és cada sortida, i només la clau pròpia del creador dirigeix el pool. Als pools antics, qui porta el relay juntament amb un membre ho podria saber. En tots, el relay veu quina connexió envia què (per Tor només si Tor ja està engegat).",
+"blind outputs (v3)": "sortides a cegues (v3)"
 }
