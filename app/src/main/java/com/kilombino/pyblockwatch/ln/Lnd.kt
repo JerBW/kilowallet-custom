@@ -24,7 +24,8 @@ object Lnd {
     val DEFAULT_PEERS = listOf(
         "nodoblake2b.airdns.org:11010",   // Kilombino's Knots node
         "179.27.118.130:8343",            // PyBLOCK
-        "173.249.217.35:4142",            // PyBLOCK
+        // PyBLOCK's 173.249.217.35:4142 (Knots 29.4.3rc1) answered every getheaders with no headers
+        // on 18 Oct 2026, and neutrino kept it as its sync peer for good: left out until it serves them.
         "82.67.102.15:8333",              // mempool.guide
         "home.skyhawk.ca:8333",
     )
@@ -71,6 +72,9 @@ object Lnd {
             appendLine("fee.url=$FEE_URL")
             appendLine("[protocol]")
             appendLine("protocol.wumbo-channels=true")
+            // Channels can take more funds or give some back without closing (BOLT 2 splicing).
+            // From the first start with it the channel database can't go back to a build without it.
+            appendLine("protocol.splice=true")
             appendLine("[wtclient]")
             appendLine("wtclient.active=true")
             if (torSocks != null) {
@@ -222,11 +226,60 @@ object Lnd {
     data class Channel(
         val active: Boolean, val peer: String, val point: String, val capacity: Long,
         val local: Long, val remote: Long, val peerAlias: String, val chanId: Long = 0,
+        /** Whether a splice can start now: "ok", or why not (lnrpc Channel.splice_status). */
+        val spliceStatus: String = "",
+        /** The splice in progress, if any. */
+        val splice: Splice? = null,
+    )
+
+    /** A splice in progress (lnrpc.PendingSplice). */
+    data class Splice(
+        val state: String, val localDelta: Long, val txid: String, val confirmations: Int, val lockDepth: Int,
+        val dead: Boolean, val relayStatus: String, val newCapacity: Long,
     )
 
     suspend fun channels(): List<Channel> =
         call { Lndmobile.listChannels(Pb().bool(6, true).build(), it) }.msgs(11).map {
-            Channel(it.bool(1), it.string(2), it.string(3), it.long(5), it.long(6), it.long(7), it.string(34), it.long(4))
+            val sp = if (it.has(1003)) it.msg(1003).let { p ->
+                Splice(p.string(2), p.long(3), p.string(8), p.int(10), p.int(11), p.bool(14), p.string(15), p.long(18))
+            } else null
+            Channel(it.bool(1), it.string(2), it.string(3), it.long(5), it.long(6), it.long(7), it.string(34), it.long(4),
+                it.string(1002), sp)
+        }
+
+    /** What a splice would do (lnrpc.EstimateSpliceResponse); [refusal] is empty when it can go ahead. */
+    data class SpliceEstimate(
+        val fee: Long, val satPerVbyte: Long, val amount: Long, val minSats: Long, val maxIn: Long, val maxOut: Long,
+        val minSatPerVbyte: Long, val newCapacity: Long, val newLocal: Long, val lockDepth: Int, val refusal: String,
+    )
+
+    private fun spliceReq(point: String, out: Boolean, sats: Long?, satPerVbyte: Long, addr: String?): Pb {
+        val b = Pb().msg(1, Pb().string(2, point.substringBefore(':')).int(3, point.substringAfter(':').toInt()))
+            .int(2, if (out) 1 else 0)
+        if (sats == null) b.bool(4, true) else b.int(3, sats)
+        b.int(5, satPerVbyte)
+        if (out && !addr.isNullOrBlank()) b.string(7, addr.trim())
+        return b
+    }
+
+    /** [sats] into the channel from the node's wallet, or out of it ([out]); null = as much as possible. */
+    suspend fun estimateSplice(point: String, out: Boolean, sats: Long?, satPerVbyte: Long, addr: String? = null): SpliceEstimate {
+        val r = call { Lndmobile.estimateSplice(spliceReq(point, out, sats, satPerVbyte, addr).build(), it) }
+        return SpliceEstimate(r.long(1), r.long(3), r.long(4), r.long(5), r.long(6), r.long(7), r.long(8),
+            r.long(11), r.long(12), r.int(13), r.string(15))
+    }
+
+    /** Starts the splice; returns its transaction id once both nodes have signed it, or throws with why not. */
+    suspend fun splice(point: String, out: Boolean, sats: Long?, satPerVbyte: Long, addr: String? = null): String =
+        suspendCancellableCoroutine { cont ->
+            val req = spliceReq(point, out, sats, satPerVbyte, addr).build()
+            stream({ Lndmobile.spliceChannel(req, it) }, onMsg = { u ->
+                when (u.string(1)) {
+                    "signed", "broadcast", "confirmed", "locked" -> if (u.string(2).isNotEmpty() && cont.isActive) cont.resume(u.string(2))
+                    "aborted" -> if (cont.isActive) cont.resumeWithException(LndError(
+                        (if (u.bool(6)) "the other node said: " else "") + u.string(5).ifEmpty { "the splice was aborted" }))
+                }
+            }, onEnd = { e -> if (cont.isActive) cont.resumeWithException(e ?: LndError("the splice ended without an answer")) })
         }
 
     data class Pending(val peer: String, val point: String, val capacity: Long, val local: Long, val confirmationsLeft: Int)

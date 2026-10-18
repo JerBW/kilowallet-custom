@@ -213,6 +213,8 @@ private fun LnNode(s: Lightning.Status.Running, accent: Color, settings: Boolean
     showTx?.let { (t, id) -> TxDialog(t, id, accent, vm) { showTx = null } }
     var speeding by remember { mutableStateOf<Lnd.Closing?>(null) }
     speeding?.let { c -> SpeedUpCloseDialog(c, accent) { speeding = null } }
+    var resizing by remember { mutableStateOf<Lnd.Channel?>(null) }
+    resizing?.let { c -> ResizeChannelDialog(c, accent, vm, onTx = { showTx = "Resize transaction" to it }) { resizing = null } }
     val book = remember(s) { ledger(s) }
     var sheet by remember { mutableStateOf(LnSheet.None) }
     val i = s.info
@@ -313,12 +315,27 @@ private fun LnNode(s: Lightning.Status.Running, accent: Color, settings: Boolean
                          else "Cannot reach it yet; it keeps trying. " + e.lines().first().substringAfter("desc = "),
                         style = MaterialTheme.typography.labelSmall, color = TextFaint)
                 }
+            c.splice?.let { sp ->
+                Text(spliceLine(sp), style = MaterialTheme.typography.bodySmall, color = if (sp.dead) Bad else Warn)
+            }
             Row {
                 TextButton(onClick = { showTx = "Funding transaction" to c.point.substringBefore(':') },
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)) {
                     Text("VIEW FUNDING TX", color = accent, style = MaterialTheme.typography.labelSmall)
                 }
                 Spacer(Modifier.width(16.dp))
+                if (c.splice == null) {
+                    TextButton(onClick = { resizing = c }, contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)) {
+                        Text("RESIZE", color = accent, style = MaterialTheme.typography.labelSmall)
+                    }
+                    Spacer(Modifier.width(16.dp))
+                } else if (c.splice.txid.isNotEmpty()) {
+                    TextButton(onClick = { showTx = "Resize transaction" to c.splice.txid },
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)) {
+                        Text("VIEW RESIZE TX", color = accent, style = MaterialTheme.typography.labelSmall)
+                    }
+                    Spacer(Modifier.width(16.dp))
+                }
                 TextButton(onClick = { closing = listOf(c) }, contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)) {
                     Text("CLOSE CHANNEL", color = accent, style = MaterialTheme.typography.labelSmall)
                 }
@@ -1259,6 +1276,145 @@ private fun Movements(accent: Color, moves: List<LnEntry>, title: String) {
             }
         }
     }
+}
+
+/** A resize in progress, in a line: how far it is and what it does to our side. */
+private fun spliceLine(sp: Lnd.Splice): String = when {
+    sp.dead -> "resize failed: one of its coins was spent elsewhere. The channel keeps working at its old size; a new resize can't start until it closes."
+    else -> "resizing " + (if (sp.localDelta >= 0) "+" else "") + groupSats(sp.localDelta) + " sats → " + groupSats(sp.newCapacity) +
+        " sats · " + when (sp.state) {
+            "confirmed" -> "${sp.confirmations}/${sp.lockDepth} confirmations"
+            "broadcast" -> "waiting for its first confirmation"
+            else -> sp.state
+        } + " · the channel keeps working meanwhile"
+}
+
+/** Why a channel can't be resized now (lnrpc Channel.splice_status), in words. */
+private fun spliceRefusal(code: String): String = when (code) {
+    "peer_offline" -> "The other node is offline: it has to be online to resize."
+    "peer_unsupported" -> "The other node doesn't support resizing channels."
+    "no_unified_sigs", "taproot", "zero_conf" -> "This channel can't be resized (it was opened without the signatures resizing needs). Close it and open a new one."
+    "pending" -> "A resize of this channel is already under way."
+    "closing" -> "The channel is closing."
+    "disabled" -> "Resizing is off on this node."
+    "peer_not_locked" -> "The other node hasn't finished the last resize yet."
+    "peer_misbehaved" -> "The other node broke an earlier resize: try again after restarting the app."
+    "insufficient_funds" -> "Not enough on-chain coins in the node for that (FUND first)."
+    "immature_inputs" -> "The node's on-chain coins need more confirmations first."
+    "below_min" -> "That amount is too small."
+    "above_max_out" -> "That's more than your side of the channel can give."
+    "fee_below_floor" -> "That fee rate is below what the network relays now."
+    "reserve_on_change" -> "The node must keep a reserve on-chain for its channels: try a little less."
+    "close_address_set" -> "This channel only pays out to the address it was opened with."
+    "node_cap" -> "Too many resizes at once on this node: try later."
+    else -> "Not possible now ($code)."
+}
+
+/**
+ * RESIZE: more of the node's on-chain coins into the channel, or part of our side out of it,
+ * without closing it (splicing). The channel keeps working while the new transaction confirms.
+ */
+@Composable
+private fun ResizeChannelDialog(c: Lnd.Channel, accent: Color, vm: WalletViewModel, onTx: (String) -> Unit, onDone: () -> Unit) {
+    val scope = rememberCoroutineScope()
+    var out by remember { mutableStateOf(false) }
+    var amount by remember { mutableStateOf("") }
+    var fee by remember { mutableStateOf("2") }
+    val rate = (fee.toLongOrNull() ?: 0).coerceAtLeast(0)
+    var feeOk by remember { mutableStateOf(false) }
+    // Funds moved out: to the BTC wallet (a fresh address), the node's own coins, or another address.
+    val btc = remember { runCatching { vm.receiveAddress(vm.nextReceiveIndex())?.first }.getOrNull() }
+    var dest by remember { mutableStateOf(if (btc != null) 0 else 1) }
+    var pasted by remember { mutableStateOf("") }
+    val to = when { !out -> null; dest == 0 -> btc; dest == 2 -> pasted.ifBlank { null }; else -> null }
+    val sats = amount.toLongOrNull()
+    var est by remember { mutableStateOf<Lnd.SpliceEstimate?>(null) }
+    var estError by remember { mutableStateOf<String?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    var msg by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
+    LaunchedEffect(out, sats, rate, to) {
+        est = null; estError = null
+        if (c.spliceStatus != "ok" && c.spliceStatus != "peer_not_announcing") return@LaunchedEffect
+        if (rate < 1) return@LaunchedEffect
+        kotlinx.coroutines.delay(400)
+        runCatching { withContext(Dispatchers.IO) { Lnd.estimateSplice(c.point, out, sats, rate, to) } }
+            .onSuccess { est = it }.onFailure { estError = it.message }
+    }
+    AlertDialog(onDismissRequest = { if (!busy) onDone() },
+        title = { Text("Resize the channel with ${c.peerAlias.ifBlank { c.peer.take(12) + "…" }}") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.verticalScroll(androidx.compose.foundation.rememberScrollState())) {
+                if (c.spliceStatus != "ok" && c.spliceStatus != "peer_not_announcing") {
+                    Text(spliceRefusal(c.spliceStatus.ifEmpty { "disabled" }), style = MaterialTheme.typography.bodySmall, color = Warn)
+                    return@Column
+                }
+                Text("Now ${groupSats(c.capacity)} sats · yours ${groupSats(c.local)}", style = MaterialTheme.typography.bodySmall)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    androidx.compose.material3.RadioButton(selected = !out, onClick = { out = false })
+                    Text("Add from the node's on-chain coins", style = MaterialTheme.typography.bodySmall)
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    androidx.compose.material3.RadioButton(selected = out, onClick = { out = true })
+                    Text("Take out part of your side", style = MaterialTheme.typography.bodySmall)
+                }
+                OutlinedTextField(amount, { amount = it.filter(Char::isDigit) }, label = { Text("sats (empty = as much as possible)") },
+                    singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
+                if (out) {
+                    Text("Send them to:", style = MaterialTheme.typography.bodySmall)
+                    if (btc != null) Row(verticalAlignment = Alignment.CenterVertically) {
+                        androidx.compose.material3.RadioButton(selected = dest == 0, onClick = { dest = 0 })
+                        Text("My BTC wallet (" + btc.take(10) + "…)", style = MaterialTheme.typography.bodySmall)
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        androidx.compose.material3.RadioButton(selected = dest == 1, onClick = { dest = 1 })
+                        Text("The Lightning node's on-chain coins", style = MaterialTheme.typography.bodySmall)
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        androidx.compose.material3.RadioButton(selected = dest == 2, onClick = { dest = 2 })
+                        Text("Another address", style = MaterialTheme.typography.bodySmall)
+                    }
+                    if (dest == 2) OutlinedTextField(pasted, { pasted = it.trim().removePrefix("bitcoin:").substringBefore('?') },
+                        label = { Text("bc1…") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                }
+                OutlinedTextField(fee, { fee = it.filter(Char::isDigit) }, label = { Text("Fee rate (sat/vB)") }, singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
+                if (rate > HIGH_FEE_RATE) FeeGate("This fee is high: $rate sat/vB.", feeOk) { feeOk = !feeOk }
+                est?.let { e ->
+                    if (e.refusal.isNotEmpty()) Text(spliceRefusal(e.refusal), style = MaterialTheme.typography.bodySmall, color = Warn)
+                    else {
+                        Text((if (out) "Out: " else "In: ") + groupSats(e.amount) + " sats · fee " + groupSats(e.fee) + " sats (" + e.satPerVbyte + " sat/vB)",
+                            style = MaterialTheme.typography.bodySmall, color = TextMain)
+                        Text("Channel after: ${groupSats(e.newCapacity)} sats · yours ${groupSats(e.newLocal)}", style = MaterialTheme.typography.bodySmall, color = TextMain)
+                        if (e.minSatPerVbyte > 0 && rate < e.minSatPerVbyte)
+                            Text("The network wants at least ${e.minSatPerVbyte} sat/vB now.", style = MaterialTheme.typography.bodySmall, color = Warn)
+                    }
+                }
+                estError?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = Bad) }
+                Text("The channel keeps working while the new transaction confirms. It takes the new size after " +
+                    "${est?.lockDepth?.takeIf { it > 0 } ?: 6} confirmations." +
+                    (if (!out) " The coins you add can pay through this peer only after 36 confirmations (about 6 hours): " +
+                        "it waits that long so nobody can undo them with a chain reorganisation." else ""),
+                    style = MaterialTheme.typography.bodySmall, color = TextSoft)
+                msg?.let { (t, ok) -> Text(t, color = if (ok) Good else Bad, style = MaterialTheme.typography.bodySmall) }
+            }
+        },
+        confirmButton = {
+            val ok = c.spliceStatus == "ok" || c.spliceStatus == "peer_not_announcing"
+            if (msg?.second == true) TextButton(onClick = onDone) { Text("OK", color = accent) }
+            else if (ok) TextButton(enabled = !busy && est != null && est!!.refusal.isEmpty() && rate >= 1 &&
+                (!out || dest != 2 || pasted.length > 20) && (rate <= HIGH_FEE_RATE || feeOk), onClick = {
+                busy = true; msg = null
+                scope.launch {
+                    runCatching { withContext(Dispatchers.IO) { Lnd.splice(c.point, out, sats, rate, to) } }
+                        .onSuccess { txid -> msg = "Resize sent. It locks after its confirmations; the channel keeps working." to true; onTx(txid) }
+                        .onFailure { msg = (it.message ?: "The resize failed") to false }
+                    busy = false
+                }
+            }) { Text(if (busy) "RESIZING…" else if (out) "TAKE OUT" else "ADD", color = accent) }
+        },
+        dismissButton = { if (!busy && msg?.second != true) TextButton(onClick = onDone) { Text("CANCEL", color = TextSoft) } },
+        containerColor = PanelBg, titleContentColor = TextMain, textContentColor = TextSoft,
+    )
 }
 
 /**
