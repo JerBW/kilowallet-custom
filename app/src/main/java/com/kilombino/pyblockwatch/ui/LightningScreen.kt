@@ -920,7 +920,7 @@ private fun MoveOut(accent: Color) {
         val b = pack ?: return@rememberLauncherForActivityResult
         if (uri == null) {
             // Not saved: the node stays here, stopped; it starts again with the app.
-            pack = null; msg = "Not saved. Lightning stays on this phone (it starts again when you reopen the app)." to false
+            pack = null; LnMove.cancelMove(ctx); msg = "Not saved. Lightning stays on this phone (it starts again when you reopen the app)." to false
             return@rememberLauncherForActivityResult
         }
         runCatching {
@@ -928,7 +928,7 @@ private fun MoveOut(accent: Color) {
             val back = ctx.contentResolver.openInputStream(uri)!!.use { it.readBytes() }
             check(back.contentEquals(b)) { "the saved file does not match" }
         }.onSuccess { pack = null; LnMove.forgetHere(ctx) }
-         .onFailure { msg = "Error saving: ${it.message}. Lightning stays on this phone." to false }
+         .onFailure { LnMove.cancelMove(ctx); msg = "Error saving: ${it.message}. Lightning stays on this phone." to false }
     }
     Panel(accent = accent) {
         SectionLabel("Move Lightning to another phone", accent)
@@ -943,13 +943,14 @@ private fun MoveOut(accent: Color) {
         title = { Text("Move Lightning out of this phone?") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("The node stops, its whole state goes into a file protected by this password, and Lightning is deleted here once the file is saved. Keep the file and the password: they are the only copy of the open channels until the other phone takes it in.",
+                Text("The node stops, its whole state goes into a file protected by this password, and Lightning is deleted here once the file is saved. Keep the file and the password: they are the only copy of the open channels until the other phone takes it in." +
+                    "\n\nAt least ${LnMove.MIN_PASSWORD} characters: the file holds the node's keys.",
                     style = MaterialTheme.typography.bodySmall)
                 PasswordFields(pw1, pw2, { pw1 = it }, { pw2 = it })
             }
         },
         confirmButton = {
-            TextButton(enabled = pw1.length >= 8 && pw1 == pw2, onClick = {
+            TextButton(enabled = pw1.length >= LnMove.MIN_PASSWORD && pw1 == pw2, onClick = {
                 val pw = pw1; ask = false; pw1 = ""; pw2 = ""
                 Biometric.confirm(activity, "Move Lightning out", "Confirm it is you",
                     onSuccess = {
@@ -957,7 +958,7 @@ private fun MoveOut(accent: Color) {
                         scope.launch {
                             runCatching { withContext(Dispatchers.IO) { LnMove.export(ctx, pw) } }
                                 .onSuccess { pack = it; msg = null; save.launch("kilowallet-lightning.move") }
-                                .onFailure { msg = "Error: ${it.message}" to false }
+                                .onFailure { LnMove.cancelMove(ctx); msg = "Error: ${it.message}" to false }
                         }
                     },
                     onError = { msg = it to false })

@@ -28,6 +28,12 @@ object Tor {
     @Volatile var available: Boolean = false
         private set
 
+    /**
+     * The SOCKS proxy when Tor is already running, else null: for requests that go through Tor
+     * when it is on (so they don't wait for it to start), and directly otherwise.
+     */
+    fun proxyIfRunning(): java.net.Proxy? = if (running) proxy(0) else null
+
     /** Tor is up: started for something else (a node reached by .onion) and its SOCKS port open. */
     val running: Boolean get() = bound && runCatching { (service?.socksPort ?: -1) > 0 }.getOrDefault(false)
 

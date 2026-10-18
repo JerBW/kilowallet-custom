@@ -384,8 +384,42 @@ class NodeRpcBackend(private val node: RpcNode) {
 
         /** Try [c] and say what is there: chain, height and node version, or why it failed. */
         /** Try [c]: (what is there, the TLS certificate's fingerprint for https). Accepts any certificate, to show it. */
+        /**
+         * The certificate an https node presents, from the TLS handshake alone: no request is
+         * sent, so the RPC password goes nowhere before the user has compared this fingerprint
+         * with the one the node shows (StartOS: the interface's certificate) and trusted it.
+         */
+        fun probeCertificate(c: RpcConn): String {
+            val u = URL(c.url)
+            var leaf: java.security.cert.X509Certificate? = null
+            val tm = object : javax.net.ssl.X509TrustManager {
+                override fun checkClientTrusted(chain: Array<java.security.cert.X509Certificate>, authType: String) {}
+                override fun checkServerTrusted(chain: Array<java.security.cert.X509Certificate>, authType: String) { leaf = chain.firstOrNull() }
+                override fun getAcceptedIssuers(): Array<java.security.cert.X509Certificate> = emptyArray()
+            }
+            val ctx = javax.net.ssl.SSLContext.getInstance("TLS").apply { init(null, arrayOf(tm), java.security.SecureRandom()) }
+            val port = if (u.port > 0) u.port else 443
+            val raw = if (c.isOnion) {
+                val proxy = torProxy?.invoke() ?: throw NodeException("${c.url} is a .onion: turn on Tor first.")
+                java.net.Socket(proxy).apply { connect(java.net.InetSocketAddress.createUnresolved(u.host, port), 60_000) }
+            } else java.net.Socket().apply { connect(java.net.InetSocketAddress(u.host, port), 10_000) }
+            (ctx.socketFactory.createSocket(raw, u.host, port, true) as javax.net.ssl.SSLSocket).use { s ->
+                s.soTimeout = 15_000
+                s.startHandshake()
+            }
+            return leaf?.let { Hashes.sha256(it.encoded).toHex() } ?: throw NodeException("${c.url} showed no certificate.")
+        }
+
+        /** A fingerprint as it is easiest to compare by eye: groups of four. */
+        fun spaced(fp: String): String = fp.uppercase().chunked(4).joinToString(" ")
+
+        /**
+         * Logs in and reads what the node is. An https connection must carry the pin the user
+         * confirmed ([probeCertificate] first): the password is sent only to that certificate.
+         */
         fun test(c: RpcConn): Pair<String, String?> {
-            val b = NodeRpcBackend(RpcNode(listOf(c), "", ScriptType.P2WPKH)).apply { testing = true }
+            if (c.isTls && c.pin.isEmpty()) throw NodeException("Check the node's certificate first.")
+            val b = NodeRpcBackend(RpcNode(listOf(c), "", ScriptType.P2WPKH))
             val info = b.call(c, "getblockchaininfo") as JSONObject
             val dep = b.call(c, "getdeploymentinfo") as JSONObject
             val blake = dep.toString().contains(Regex("\"(blake2b|hardfork)\":\\{[^}]*\"active\":true"))

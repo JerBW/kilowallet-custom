@@ -129,7 +129,10 @@ object Lightning {
         val notifier = com.kilombino.pyblockwatch.data.Notifier(app)
         for (a in addrs) {
             val arr = runCatching {
-                val c = (java.net.URL("https://mempool.kilombino.com/api/address/$a/txs").openConnection() as java.net.HttpURLConnection)
+                // Through Tor when it is already on: the explorer would otherwise see this phone's
+                // address next to the node's on-chain addresses.
+                val u = java.net.URL("https://mempool.kilombino.com/api/address/$a/txs")
+                val c = ((com.kilombino.pyblockwatch.chain.Tor.proxyIfRunning()?.let { u.openConnection(it) } ?: u.openConnection()) as java.net.HttpURLConnection)
                     .apply { connectTimeout = 10_000; readTimeout = 10_000 }
                 try { org.json.JSONArray(c.inputStream.bufferedReader().use { it.readText() }) } finally { c.disconnect() }
             }.getOrNull() ?: continue
@@ -225,7 +228,7 @@ object Lightning {
                     File(app.noBackupFilesDir, RESTORE_SCB).delete()
                 }
             }
-            app.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean("enabled", true).apply()
+            app.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean("enabled", true).putBoolean("moving", false).apply()
         } catch (e: Exception) {
             _status.value = Status.Failed(e.message ?: "Lightning did not start"); throw e
         } finally { bip39Seed.fill(0) }
@@ -235,6 +238,9 @@ object Lightning {
     fun resume(ctx: Context) {
         val app = ctx.applicationContext
         if (!enabled(app)) { _status.value = Status.Off; return }
+        // A move to another phone was under way when the app last stopped: don't bring this node
+        // up by itself (it may already run there). Turning Lightning on by hand clears this.
+        if (app.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean("moving", false)) { _status.value = Status.Off; return }
         scope.launch {
             lock.withLock {
                 if (Lnd.running && _status.value is Status.Running) return@withLock

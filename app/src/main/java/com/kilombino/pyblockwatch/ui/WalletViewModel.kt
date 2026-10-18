@@ -606,6 +606,12 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** What is at [c]: node version, height and whether it is on BLAKE2b, or why it failed. */
+    /** The certificate an https node shows, without logging in (null, with the reason, if it can't be reached). */
+    suspend fun probeRpcCertificate(c: com.kilombino.pyblockwatch.chain.RpcConn): Result<String> =
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching { com.kilombino.pyblockwatch.chain.NodeRpcBackend.probeCertificate(c) }
+        }
+
     suspend fun testRpc(c: com.kilombino.pyblockwatch.chain.RpcConn): Pair<String, String?> =
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             runCatching { com.kilombino.pyblockwatch.chain.NodeRpcBackend.test(c) }

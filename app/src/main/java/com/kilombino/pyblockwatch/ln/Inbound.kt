@@ -19,7 +19,9 @@ object Inbound {
     data class Order(val status: String, val fundingTxid: String?, val reason: String?)
 
     private fun http(method: String, path: String, body: JSONObject? = null): JSONObject {
-        val c = (URL(API + path).openConnection() as HttpURLConnection).apply {
+        // Through Tor when it is already on, so the service doesn't see this phone's address.
+        val proxy = com.kilombino.pyblockwatch.chain.Tor.proxyIfRunning()
+        val c = ((if (proxy != null) URL(API + path).openConnection(proxy) else URL(API + path).openConnection()) as HttpURLConnection).apply {
             requestMethod = method; connectTimeout = 15_000; readTimeout = 30_000
             setRequestProperty("Accept", "application/json"); setRequestProperty("User-Agent", "Kilowallet")
             if (body != null) { doOutput = true; setRequestProperty("Content-Type", "application/json") }
