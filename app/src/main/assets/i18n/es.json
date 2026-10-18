@@ -1920,5 +1920,17 @@
 "TURN ON ARK": "ACTIVAR ARK",
 "Ark: balance found": "Ark: saldo detectado",
 "{0} sats in Ark": "{0} sats en Ark",
-"{0} sats in Ark and {1} sats in its on-chain deposit": "{0} sats en Ark y {1} sats en su depósito on-chain"
+"{0} sats in Ark and {1} sats in its on-chain deposit": "{0} sats en Ark y {1} sats en su depósito on-chain",
+"Open the converter?": "¿Abrir el conversor?",
+"The XBT, sats, Poolcoins, EUR and USD converter, over the home screen.": "El conversor de XBT, sats, Poolcoins, EUR y USD, sobre la pantalla de inicio.",
+"Open this page?": "¿Abrir esta página?",
+"Open Kilowallet?": "¿Abrir Kilowallet?",
+"The wallet app.": "La app de la cartera.",
+"The price, on the exchange it comes from": "El precio, en el exchange de donde sale",
+"The price in Poolsats, on the exchange it comes from": "El precio en Poolsats, en el exchange de donde sale",
+"Hashrate and difficulty, on the explorer": "Hashrate y dificultad, en el explorador",
+"The latest block, on the explorer": "El último bloque, en el explorador",
+"Mining, on the explorer": "Minería, en el explorador",
+"The chain, on the explorer": "La cadena, en el explorador",
+"Hashrate rental prices, on MiningRigRentals": "Precios de alquiler de hashrate, en MiningRigRentals"
 }

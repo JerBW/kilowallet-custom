@@ -1908,5 +1908,17 @@
 "TURN ON ARK": "开启 ARK",
 "Ark: balance found": "Ark：发现余额",
 "{0} sats in Ark": "Ark 中有 {0} sats",
-"{0} sats in Ark and {1} sats in its on-chain deposit": "Ark 中有 {0} sats，其链上存款中有 {1} sats"
+"{0} sats in Ark and {1} sats in its on-chain deposit": "Ark 中有 {0} sats，其链上存款中有 {1} sats",
+"Open the converter?": "打开换算器？",
+"The XBT, sats, Poolcoins, EUR and USD converter, over the home screen.": "XBT、sats、Poolcoins、EUR 和 USD 换算器，显示在主屏幕上方。",
+"Open this page?": "打开此页面？",
+"Open Kilowallet?": "打开 Kilowallet？",
+"The wallet app.": "钱包应用。",
+"The price, on the exchange it comes from": "价格，在其来源的交易所",
+"The price in Poolsats, on the exchange it comes from": "以 Poolsats 计的价格，在其来源的交易所",
+"Hashrate and difficulty, on the explorer": "算力和难度，在区块浏览器",
+"The latest block, on the explorer": "最新区块，在区块浏览器",
+"Mining, on the explorer": "挖矿，在区块浏览器",
+"The chain, on the explorer": "区块链，在区块浏览器",
+"Hashrate rental prices, on MiningRigRentals": "算力租赁价格，在 MiningRigRentals"
 }
