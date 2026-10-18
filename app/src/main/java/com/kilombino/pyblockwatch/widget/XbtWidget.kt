@@ -180,7 +180,7 @@ class XbtWidget : AppWidgetProvider() {
                 link(R.id.diff_next_row, "Hashrate and difficulty, on the explorer", graph)
                 link(R.id.earns, "Mining, on the explorer", "$explorer/mining")
                 link(R.id.kwh, "Mining, on the explorer", "$explorer/mining")
-                link(R.id.ysh, "Mining, on the explorer", "$explorer/mining")
+                link(R.id.ysh, "YSH, the explorer's tool", "$explorer/es/tools/ysh")
                 link(R.id.chain, "The chain, on the explorer", explorer)
                 link(R.id.rent, "Hashrate rental prices, on MiningRigRentals", "https://www.miningrigrentals.com/rigs/blake2b")
                 ask(R.id.convert, 2, WidgetOpenActivity.TARGET_CONVERTER)

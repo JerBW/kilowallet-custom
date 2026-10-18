@@ -591,7 +591,7 @@ object Ark {
      * estimate from the current rate and the size of a transaction spending every deposit
      * coin, which is what the wallet's coin selection does at worst.
      */
-    fun estimateDepositSend(dest: String, sats: Long?): Estimate? = runCatching {
+    fun estimateDepositSend(dest: String, sats: Long?, feeRate: Double? = null): Estimate? = runCatching {
         val d = dest.trim()
         if (d.startsWith("ark1", ignoreCase = true) || d.startsWith("ln", ignoreCase = true)) {
             return@runCatching Estimate(0, 0, 0, false, "",
@@ -599,7 +599,7 @@ object Ark {
         }
         val b = balance()
         val available = b.onchainConfirmed
-        val rate = JSONObject(call("GET", "/fees/onchain")).let { r ->
+        val rate = feeRate ?: JSONObject(call("GET", "/fees/onchain")).let { r ->
             listOf("regular_sat_per_vb", "slow_sat_per_vb", "fast_sat_per_vb").firstNotNullOfOrNull { k -> r.optDouble(k).takeIf { !it.isNaN() && it > 0 } } ?: 1.0
         }.coerceAtLeast(1.0)
         val inputs = runCatching { JSONArray(call("GET", "/onchain/utxos")).length() }.getOrDefault(1).coerceAtLeast(1)
@@ -631,11 +631,12 @@ object Ark {
         }
     }
 
-    fun sendFromDeposit(dest: String, sats: Long?, maxTotal: Long? = null): String {
-        recheck(maxTotal) { estimateDepositSend(dest, sats) }
+    fun sendFromDeposit(dest: String, sats: Long?, maxTotal: Long? = null, feeRate: Double? = null): String {
+        recheck(maxTotal) { estimateDepositSend(dest, sats, feeRate) }
         val d = dest.trim()
-        val r = if (sats == null) JSONObject(call("POST", "/onchain/drain", JSONObject().put("destination", d), 120_000))
-        else JSONObject(call("POST", "/onchain/send", JSONObject().put("destination", d).put("amount_sat", sats), 120_000))
+        val req = JSONObject().put("destination", d).apply { if (feeRate != null) put("fee_rate_sat_per_vb", feeRate) }
+        val r = if (sats == null) JSONObject(call("POST", "/onchain/drain", req, 120_000))
+        else JSONObject(call("POST", "/onchain/send", req.put("amount_sat", sats), 120_000))
         return "Sent from the deposit: " + r.optString("txid").take(16) + "…"
     }
 
@@ -815,9 +816,10 @@ object Ark {
     private fun ids(a: List<String>) = JSONArray().apply { a.forEach { put(it) } }
 
     /** Deposit send from exactly [coins]: [sats] to [dest], or all of them with no amount. */
-    fun estimateDepositCoins(dest: String, sats: Long?, coins: List<String>): Estimate? = runCatching {
+    fun estimateDepositCoins(dest: String, sats: Long?, coins: List<String>, feeRate: Double? = null): Estimate? = runCatching {
         val req = JSONObject().put("destination", dest.trim()).put("outpoints", ids(coins))
         if (sats != null) req.put("amount_sat", sats)
+        if (feeRate != null) req.put("fee_rate_sat_per_vb", feeRate)
         val r = JSONObject(call("POST", "/onchain/send-selected/estimate", req))
         val amount = r.optLong("amount_sat"); val fee = r.optLong("fee_sat"); val change = r.optLong("change_sat")
         Estimate(amount, fee, amount + fee, true,
@@ -825,10 +827,11 @@ object Ark {
                 (if (change > 0) "; ${change} sats of change back to the deposit." else "."))
     }.getOrElse { e -> if (e is ArkError) Estimate(0, 0, 0, false, "", e.message) else null }
 
-    fun sendDepositCoins(dest: String, sats: Long?, coins: List<String>, maxTotal: Long? = null): String {
-        recheck(maxTotal) { estimateDepositCoins(dest, sats, coins) }
+    fun sendDepositCoins(dest: String, sats: Long?, coins: List<String>, maxTotal: Long? = null, feeRate: Double? = null): String {
+        recheck(maxTotal) { estimateDepositCoins(dest, sats, coins, feeRate) }
         val req = JSONObject().put("destination", dest.trim()).put("outpoints", ids(coins))
         if (sats != null) req.put("amount_sat", sats)
+        if (feeRate != null) req.put("fee_rate_sat_per_vb", feeRate)
         val r = JSONObject(call("POST", "/onchain/send-selected", req, 120_000))
         return "Sent from the chosen coins: " + r.optString("txid").take(16) + "…"
     }

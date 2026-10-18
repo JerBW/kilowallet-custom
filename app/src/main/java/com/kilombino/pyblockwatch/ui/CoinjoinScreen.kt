@@ -220,6 +220,8 @@ fun CoinjoinScreen(vm: WalletViewModel, accent: Color) {
         return
     }
 
+    val waitingPerfect by com.kilombino.pyblockwatch.coinjoin.PerfectCoin.waiting.collectAsState()
+    LaunchedEffect(rev / 1_000_000) { com.kilombino.pyblockwatch.coinjoin.PerfectCoin.load(ctx) }
     // JOIN · IN PROGRESS · HISTORY: rounds going are shown first when there are any.
     CoinjoinTabs(tab, active.size, accent) { tab = it }
     // A card opens by itself while its round waits on you; a tap opens or folds it.
@@ -228,8 +230,7 @@ fun CoinjoinScreen(vm: WalletViewModel, accent: Color) {
         open = unfolded[st.poolId] ?: needsMe(st), onToggle = { unfolded[st.poolId] = !(unfolded[st.poolId] ?: needsMe(st)) }) { message = it }
 
     if (tab == 1) {
-        val perfect by com.kilombino.pyblockwatch.coinjoin.PerfectCoin.waiting.collectAsState()
-        LaunchedEffect(rev / 1_000_000) { com.kilombino.pyblockwatch.coinjoin.PerfectCoin.load(ctx) }
+        val perfect = waitingPerfect
         if (active.isEmpty() && perfect.isEmpty()) Explain("No rounds going. Join a pool, or open your own, in JOIN.")
         perfect.forEach { w -> PerfectCoinCard(w, accent, vm) }
         active.forEach { card(it) }
@@ -262,7 +263,9 @@ fun CoinjoinScreen(vm: WalletViewModel, accent: Color) {
     }
     // Only rounds still running hide their pool: one that ended or was left shows again to rejoin.
     val ours = mine.filter { it.phase !in setOf(PoolSession.Phase.ABORTED, PoolSession.Phase.REJECTED,
-        PoolSession.Phase.CONFIRMED, PoolSession.Phase.BROADCAST) }.map { it.poolId }.toSet()
+        PoolSession.Phase.CONFIRMED, PoolSession.Phase.BROADCAST) }.map { it.poolId }.toSet() +
+        // A perfect coin being made for a pool: it is already in progress, not one to join again.
+        waitingPerfect.mapNotNull { it.poolId }
     val shown = pools.orEmpty().filter { it.id !in ours && (testPools || it.amount >= Protocol.MIN_AMOUNT) }
     if (pools != null && shown.isEmpty()) Explain("No open pools right now. Open one and others will be notified.")
     shown.forEach { t ->

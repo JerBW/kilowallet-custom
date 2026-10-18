@@ -1932,5 +1932,8 @@
 "The latest block, on the explorer": "Der letzte Block, im Explorer",
 "Mining, on the explorer": "Mining, im Explorer",
 "The chain, on the explorer": "Die Chain, im Explorer",
-"Hashrate rental prices, on MiningRigRentals": "Mietpreise für Hashrate, auf MiningRigRentals"
+"Hashrate rental prices, on MiningRigRentals": "Mietpreise für Hashrate, auf MiningRigRentals",
+"YSH, the explorer's tool": "YSH, das Werkzeug des Explorers",
+"A withdrawal from Ark leaves in the server's next round: its network fee is the round's, shown in the cost.": "Eine Auszahlung aus Ark geht in der nächsten Runde des Servers hinaus: Ihre Netzwerkgebühr ist die der Runde und steht in den Kosten.",
+"Choose a network fee (sat/vB, at least 0.1).": "Wähle eine Netzwerkgebühr (sat/vB, mindestens 0,1)."
 }

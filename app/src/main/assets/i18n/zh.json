@@ -1920,5 +1920,8 @@
 "The latest block, on the explorer": "最新区块，在区块浏览器",
 "Mining, on the explorer": "挖矿，在区块浏览器",
 "The chain, on the explorer": "区块链，在区块浏览器",
-"Hashrate rental prices, on MiningRigRentals": "算力租赁价格，在 MiningRigRentals"
+"Hashrate rental prices, on MiningRigRentals": "算力租赁价格，在 MiningRigRentals",
+"YSH, the explorer's tool": "YSH，区块浏览器的工具",
+"A withdrawal from Ark leaves in the server's next round: its network fee is the round's, shown in the cost.": "从 Ark 提取会在服务器的下一轮中发出：其网络费用由该轮决定，显示在费用中。",
+"Choose a network fee (sat/vB, at least 0.1).": "请选择网络费用（sat/vB，至少 0.1）。"
 }

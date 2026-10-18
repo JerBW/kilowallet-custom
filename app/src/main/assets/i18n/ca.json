@@ -1932,5 +1932,8 @@
 "The latest block, on the explorer": "L'últim bloc, a l'explorador",
 "Mining, on the explorer": "Mineria, a l'explorador",
 "The chain, on the explorer": "La cadena, a l'explorador",
-"Hashrate rental prices, on MiningRigRentals": "Preus de lloguer de hashrate, a MiningRigRentals"
+"Hashrate rental prices, on MiningRigRentals": "Preus de lloguer de hashrate, a MiningRigRentals",
+"YSH, the explorer's tool": "YSH, l'eina de l'explorador",
+"A withdrawal from Ark leaves in the server's next round: its network fee is the round's, shown in the cost.": "Una retirada d'Ark surt a la següent ronda del servidor: la seva comissió de xarxa és la de la ronda, i es veu al cost.",
+"Choose a network fee (sat/vB, at least 0.1).": "Tria una comissió de xarxa (sat/vB, com a mínim 0,1)."
 }
