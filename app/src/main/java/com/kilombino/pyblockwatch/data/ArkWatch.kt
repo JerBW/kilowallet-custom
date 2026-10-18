@@ -32,7 +32,10 @@ object ArkWatch {
         // "seen2": since 0.15 the list also holds the deposit's transactions, so the old
         // baseline would announce every past deposit. A fresh key starts a fresh baseline.
         val seen = prefs.getString("seen2", null)?.let { JSONObject(it) }
-        val now = JSONObject()
+        // Movements missing from this pass stay remembered: right after a start the engine can list
+        // only part of its history (the deposit's transactions come later), and forgetting them would
+        // announce every old one again when they reappear.
+        val now = JSONObject(seen?.toString() ?: "{}")
         movements.forEach { now.put(it.id, it.status) }
 
         if (seen != null) {
