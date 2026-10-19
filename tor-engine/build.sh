@@ -14,6 +14,9 @@ export RUSTFLAGS="--remap-path-prefix=$PWD=/src --remap-path-prefix=$HOME/.cargo
 # What the wallet needs: a SOCKS proxy to the Tor network and to .onion services, with rustls
 # (no OpenSSL) and SQLite built in. No onion service hosting, bridges or pluggable transports.
 FEATURES="tokio,rustls-ring,static-sqlite,onion-service-client,vanguards,flowctl-cc,compression,harden"
+# All symbols stripped, not only debug info: the program is 4 MB smaller installed and
+# 0.7 MB smaller in the APK; a panic in tor.log then shows addresses instead of names.
+export CARGO_PROFILE_RELEASE_SMALL_STRIP=symbols
 cargo ndk -t "$ABI" --platform 26 build --locked --profile release-small -p arti --no-default-features --features "$FEATURES"
 T=$( [ "$ABI" = x86_64 ] && echo x86_64-linux-android || echo aarch64-linux-android )
 OUT=target/$T/release-small/arti

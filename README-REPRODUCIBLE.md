@@ -167,8 +167,10 @@ cp arti/target/aarch64-linux-android/release-small/arti app/src/main/jniLibs/arm
 ```
 
 `build.sh` uses cargo-ndk with the NDK in the table above, Android API 26, the `release-small`
-profile and path remapping, so the program has no build paths in it and the same bytes come out
+profile with all symbols stripped, and path remapping, so the program has no build paths in it and the same bytes come out
 on any machine with the same toolchain; its SHA-256 must equal `sha256=` in `ENGINE`. Features:
 a SOCKS proxy with `.onion` client support, rustls (no OpenSSL) and SQLite built in; no onion
-service hosting, bridges or pluggable transports.
+service hosting, bridges or pluggable transports. (1.1.7-beta1 shipped
+`b4b50742a24ff3dc540e6fbad4c269c68f515982314629551a0b9834f584d846`, the same build with only debug
+info stripped.)
 
