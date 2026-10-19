@@ -5,7 +5,6 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     id("com.android.application")
-    id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
@@ -19,7 +18,7 @@ val keystoreProps = Properties().apply {
 
 android {
     namespace = "com.kilombino.pyblockwatch"
-    compileSdk = 35
+    compileSdk { version = release(37) { minorApiLevel = 1 } }
 
     defaultConfig {
         applicationId = "com.kilombino.pyblockwatch"
@@ -175,7 +174,7 @@ dependencies {
     // 1.3.0+, so pull a current fragment forward explicitly.
     implementation("androidx.fragment:fragment:1.8.5")
     // Tor inside the app (no Orbot), for a node reached by .onion. BSD-3, Guardian Project.
-    implementation("info.guardianproject:tor-android:0.4.9.5")
+    implementation("info.guardianproject:tor-android:0.4.9.14")
     implementation("info.guardianproject:jtorctl:0.4.5.7")
 
     // NOTE: there is deliberately no crypto dependency here — no BouncyCastle, no

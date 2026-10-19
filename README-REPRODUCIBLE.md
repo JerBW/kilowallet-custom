@@ -25,7 +25,7 @@ pulled transitively and pinned by hash like every other dependency:
 `libimage_processing_util_jni.so` and `libsurface_util_jni.so` from CameraX.
 
 Since 0.24.0 it also carries **Tor**: `lib/arm64-v8a/libtor.so` from Guardian Project's
-`info.guardianproject:tor-android:0.4.9.5` (BSD-3), prebuilt and pinned by hash in
+`info.guardianproject:tor-android:0.4.9.14` (BSD-3), prebuilt and pinned by hash in
 `gradle/verification-metadata.xml` like every other dependency. It only runs when a
 connection goes to a `.onion` (your node reached from outside); the other ABIs' copies
 are left out of the APK.
@@ -35,10 +35,10 @@ are left out of the APK.
 | Component | Version |
 |---|---|
 | JDK (build) | Temurin/OpenJDK **17.0.20+8** |
-| Android Gradle Plugin | **8.7.3** |
-| Gradle (wrapper) | **8.11.1** |
+| Android Gradle Plugin | **9.4.1** (Kotlin built in) |
+| Gradle (wrapper) | **9.8.1** |
 | Kotlin (android + compose) | **2.3.10** |
-| compileSdk / targetSdk | **35** / **35** · build-tools **35.0.0** |
+| compileSdk / targetSdk | **37.1** / **35** · build-tools **36.0.0** |
 | Jetpack Compose | BOM **2024.12.01** |
 | R8 / minify | **on** since 0.18.0 (deterministic: two clean builds still match byte for byte); only the Ark JNI class is kept by name |
 | Packaged ABIs | all for the Kotlin app; the Ark engine is arm64-v8a only |
