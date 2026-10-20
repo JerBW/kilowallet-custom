@@ -1,4 +1,4 @@
-﻿$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 
@@ -32,7 +32,7 @@ Require-Text $manifest 'foregroundServiceType="specialUse"' 'services use specia
 
 Require-Text $chain 'accent = 0xFF278BF5' 'XBT chain accent is #278BF5'
 
-Require-Text $theme 'current = BLUE' 'palette forced to blue'
+Require-Text $theme 'current(?:\s*:\s*Set)?\s*=\s*BLUE' 'palette forced to blue'
 Reject-Text  $main 'Text\("PURPLE"' 'purple settings option removed'
 Reject-Text  $main 'Palette\.choose\(activity, false\)' 'purple selector logic removed'
 
