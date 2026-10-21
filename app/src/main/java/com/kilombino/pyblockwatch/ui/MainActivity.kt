@@ -729,7 +729,7 @@ private fun AdvancedTabs(chain: Chain, arkTab: Boolean, cjTab: Boolean, lnTab: B
     ) {
         // Each tab: its symbol over its name (a chain, lightning, a swirl, a boat).
         val tabs = buildList {
-            add(Triple("⛓\nBTC", !arkTab && !cjTab && !lnTab && chain == Chain.BLAKE2B, Color(Chain.BLAKE2B.accent)) to onBtc)
+            add(Triple("⛓\nXBT", !arkTab && !cjTab && !lnTab && chain == Chain.BLAKE2B, Color(Chain.BLAKE2B.accent)) to onBtc)
             if (hot) {
                 add(Triple("⚡\nLIGHTNING", lnTab, LnGold) to onLn)
                 add(Triple("🌀\nCOINJOIN", cjTab, CoinjoinBlue) to onCoinjoin)
@@ -770,7 +770,7 @@ private fun BalanceCard(
     }
     Panel(accent = accent) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            SectionLabel(if (chain == Chain.BLAKE2B) "BTC balance" else "Spamcoin balance", accent)
+            SectionLabel(if (chain == Chain.BLAKE2B) "XBT balance" else "Spamcoin balance", accent)
             Spacer(Modifier.weight(1f))
             StreetEye(TextSoft)
             // A visible countdown to the next auto-refresh, so the wallet reads as live.

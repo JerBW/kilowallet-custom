@@ -201,7 +201,7 @@ fun SimpleScreen(state: UiState, vm: WalletViewModel, onToggleNotifications: (Bo
         }
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            TabChip("BTC", chain == Chain.BLAKE2B, Purple, Modifier.weight(1f)) { pick(Chain.BLAKE2B) }
+            TabChip("XBT", chain == Chain.BLAKE2B, Purple, Modifier.weight(1f)) { pick(Chain.BLAKE2B) }
             TabChip("SPAMCOIN", chain == Chain.SHA256, Color(Chain.SHA256.accent), Modifier.weight(1f)) { pick(Chain.SHA256) }
         }
         state.chains[chain]?.refreshing?.let {
@@ -307,7 +307,7 @@ private fun SimpleBalance(
     onFiat: (String) -> Unit,
 ) {
     val btc = chain == Chain.BLAKE2B
-    val unit = if (btc) "BTC" else "Spamcoin"
+    val unit = if (btc) "XBT" else "Spamcoin"
     // The countdown to the next auto-refresh, as in advanced mode, so the wallet reads as live.
     var secondsUntilRefresh by remember { mutableStateOf(0) }
     androidx.compose.runtime.LaunchedEffect(nextRefreshAt) {
@@ -436,7 +436,7 @@ private fun AddWidgetButton(accent: Color) {
         mgr.requestPinAppWidget(
             android.content.ComponentName(ctx, com.kilombino.pyblockwatch.widget.XbtWidget::class.java), null, null)
     }) {
-        Text("＋ add the BTC price widget to your home screen",
+        Text("＋ add the XBT price widget to your home screen",
              style = MaterialTheme.typography.bodySmall, color = accent)
     }
 }
