@@ -428,7 +428,7 @@ private fun OnboardingScreen(state: UiState, vm: WalletViewModel) {
         // The wallet's coin, big, above its name.
         Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { AppLogo(160) }
         Text("Kilowallet", style = MaterialTheme.typography.displayLarge, color = Purple)
-        Text("BITCOIN BLAKE2b (BTC) WALLET", style = MaterialTheme.typography.titleLarge, color = TextSoft)
+        Text("BITCOIN BLAKE2b (XBT) WALLET", style = MaterialTheme.typography.titleLarge, color = TextSoft)
         if (state.hasWallet) {
             Explain("Creating or importing a wallet here REPLACES the current one. Your coins are " +
                 "safe on-chain; make sure you still have this wallet's backup before switching.")
@@ -530,12 +530,12 @@ private fun OnboardingScreen(state: UiState, vm: WalletViewModel) {
         Panel(accent = Good) {
             SectionLabel("Widget", Good)
             Spacer(Modifier.height(8.dp))
-            Explain("Only the price? Put the BTC widget on your home screen: price and Poolsats with their " +
+            Explain("Only the price? Put the XBT widget on your home screen: price and Poolsats with their " +
                 "24h change, network hashrate, mining figures and a converter. No wallet needed.")
             Spacer(Modifier.height(8.dp))
             androidx.compose.foundation.Image(
                 painter = androidx.compose.ui.res.painterResource(com.kilombino.pyblockwatch.R.drawable.widget_preview),
-                contentDescription = "The BTC widget", contentScale = androidx.compose.ui.layout.ContentScale.FillWidth,
+                contentDescription = "The XBT widget", contentScale = androidx.compose.ui.layout.ContentScale.FillWidth,
                 modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)))
             Spacer(Modifier.height(8.dp))
             val ctx = LocalContext.current
@@ -802,7 +802,7 @@ private fun AdvancedTabs(chain: Chain, arkTab: Boolean, cjTab: Boolean, lnTab: B
     ) {
         // Each tab: its symbol over its name (a chain, lightning, a swirl, a boat).
         val tabs = buildList {
-            add(Triple("⛓\nBTC", !arkTab && !cjTab && !lnTab && chain == Chain.BLAKE2B, Color(Chain.BLAKE2B.accent)) to onBtc)
+            add(Triple("⛓\nXBT", !arkTab && !cjTab && !lnTab && chain == Chain.BLAKE2B, Color(Chain.BLAKE2B.accent)) to onBtc)
             if (hot) {
                 add(Triple("⚡\nLIGHTNING", lnTab, LnGold) to onLn)
                 add(Triple("🌀\nCOINJOIN", cjTab, CoinjoinBlue) to onCoinjoin)
@@ -845,7 +845,7 @@ private fun BalanceCard(
     }
     Panel(accent = accent) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            SectionLabel(if (chain == Chain.BLAKE2B) "BTC balance" else "Spamcoin balance", accent)
+            SectionLabel(if (chain == Chain.BLAKE2B) "XBT balance" else "Spamcoin balance", accent)
             Spacer(Modifier.weight(1f))
             StreetEye(TextSoft)
             // A visible countdown to the next auto-refresh, so the wallet reads as live.
@@ -1282,13 +1282,13 @@ internal fun SettingsPanel(
         var nodeOpen by remember { mutableStateOf(false) }
         Row(Modifier.fillMaxWidth().clickable { nodeOpen = !nodeOpen }.padding(vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically) {
-            Text("${if (chain == Chain.BLAKE2B) "BTC" else "Spamcoin"} node & explorer", style = MaterialTheme.typography.bodyMedium, color = TextMain,
+            Text("${if (chain == Chain.BLAKE2B) "XBT" else "Spamcoin"} node & explorer", style = MaterialTheme.typography.bodyMedium, color = TextMain,
                 modifier = Modifier.weight(1f))
             Text(if (nodeOpen) "▾" else "▸", color = accent, style = MaterialTheme.typography.titleMedium)
         }
         if (nodeOpen) Column {
             if (chain.allowsCustomNode) {
-                Text("Your own ${if (chain == Chain.BLAKE2B) "BTC" else "Spamcoin"} node",
+                Text("Your own ${if (chain == Chain.BLAKE2B) "XBT" else "Spamcoin"} node",
                      style = MaterialTheme.typography.bodyMedium, color = TextMain)
                 Explain(if (chain == Chain.BLAKE2B) "One person, one node: put your own here (a .onion address works too, through the app's Tor). Leave empty to use " +
                         "${chain.defaultHost}:${chain.defaultPort}, meant for emergencies."
@@ -1338,7 +1338,7 @@ internal fun SettingsPanel(
             // Block explorer used to open a movement. Any mempool.space-style site works.
             var explorer by remember(chain) { mutableStateOf(vm.explorerFor(chain)) }
             var explorerMsg by remember(chain) { mutableStateOf<String?>(null) }
-            Text("${if (chain == Chain.BLAKE2B) "BTC" else "Spamcoin"} block explorer",
+            Text("${if (chain == Chain.BLAKE2B) "XBT" else "Spamcoin"} block explorer",
                  style = MaterialTheme.typography.bodyMedium, color = TextMain)
             Explain("Where a movement opens when you tap it. Default: ${vm.defaultExplorerFor(chain)}.")
             Spacer(Modifier.height(6.dp))
@@ -1367,7 +1367,7 @@ internal fun SettingsPanel(
         Spacer(Modifier.height(10.dp))
         var rescueOpen by remember { mutableStateOf(false) }
         TextButton(onClick = { rescueOpen = !rescueOpen }) {
-            Text((if (rescueOpen) "▾" else "▸") + " Rescue BTC from a pre-fork Lightning (LND) seed",
+            Text((if (rescueOpen) "▾" else "▸") + " Rescue XBT from a pre-fork Lightning (LND) seed",
                  color = TextSoft, style = MaterialTheme.typography.bodySmall)
         }
         if (rescueOpen) LndRescuePanel(vm, accent)
@@ -1448,8 +1448,8 @@ internal fun SettingsPanel(
             val spvTip = com.kilombino.pyblockwatch.chain.HeaderChain.tip
             Text("Crypto: " + (if (secp.ecdhNative) "libsecp256k1 (native, constant time) ✓"
                     else if (secp.available) "libsecp256k1 for signing, Kotlin for ECDH" else "Kotlin (no native library on this CPU)") +
-                "\nSPV: " + (if (spvTip > com.kilombino.pyblockwatch.chain.HeaderChain.CHECKPOINT_HEIGHT) "BTC headers verified up to block $spvTip ✓"
-                    else "BTC headers not verified yet (after the next look)"),
+                "\nSPV: " + (if (spvTip > com.kilombino.pyblockwatch.chain.HeaderChain.CHECKPOINT_HEIGHT) "XBT headers verified up to block $spvTip ✓"
+                    else "XBT headers not verified yet (after the next look)"),
                 style = MaterialTheme.typography.bodySmall, color = TextFaint)
         }
         // The backup file sits next to switching and forgetting, where it is needed first.

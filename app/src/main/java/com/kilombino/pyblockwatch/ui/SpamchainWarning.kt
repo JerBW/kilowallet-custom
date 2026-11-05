@@ -30,7 +30,7 @@ private fun OwnNodeFields(vm: WalletViewModel, chain: Chain, onSaved: () -> Unit
     var host by remember { mutableStateOf("") }
     var port by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
-    Text("Your own ${if (chain == Chain.BLAKE2B) "BTC" else "spamchain"} Electrum server:",
+    Text("Your own ${if (chain == Chain.BLAKE2B) "XBT" else "spamchain"} Electrum server:",
         style = MaterialTheme.typography.bodySmall, color = TextSoft)
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         OutlinedTextField(value = host, onValueChange = { host = it.trim(); error = null },
@@ -64,7 +64,7 @@ fun OwnNodeReminder(vm: WalletViewModel, onClose: () -> Unit) {
         title = { Text("One person, one node") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("You are reading BTC through ${Chain.BLAKE2B.defaultHost}. Whoever runs a " +
+                Text("You are reading XBT through ${Chain.BLAKE2B.defaultHost}. Whoever runs a " +
                     "server sees the addresses you ask about and your IP address. Run your own node and " +
                     "point the wallet at it: an Electrum server of yours, or your node itself by RPC. Use " +
                     "${Chain.BLAKE2B.defaultHost} only in an emergency.",

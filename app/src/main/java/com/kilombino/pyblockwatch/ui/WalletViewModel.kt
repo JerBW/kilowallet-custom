@@ -1659,7 +1659,7 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
                 val rate = feeRatePerVb.coerceIn(0.1, 1000.0)
                 // Extra recipients (BTC only): plain addresses or user@domain, each its own output
                 // in the same transaction, so the whole batch is signed (and replay-protected) at once.
-                require(extra.isEmpty() || chain == Chain.BLAKE2B) { "Several recipients are only for BTC." }
+                require(extra.isEmpty() || chain == Chain.BLAKE2B) { "Several recipients are only for XBT." }
                 val resolvedExtra = HashMap<Int, String>()
                 val extraOuts = extra.mapIndexed { i, (addr, sats) ->
                     require(sats > DUST_SATS) { "Recipient ${i + 2}: enter an amount above ${DUST_SATS} sats." }
@@ -1790,7 +1790,7 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(sendPhase = SendPhase.Preparing) }
         viewModelScope.launch {
             runCatching {
-                val cs = _state.value.chains[Chain.BLAKE2B] ?: error("No BTC wallet.")
+                val cs = _state.value.chains[Chain.BLAKE2B] ?: error("No XBT wallet.")
                 val endpoint = store.endpoint(Chain.BLAKE2B)
                 val coins = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                     scanner.gatherUtxos(cs.rows.filter { it.isUsed }, endpoint, store.pinnedFingerprint(endpoint))
@@ -2190,7 +2190,7 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
     fun exportPsbt(origin: String) {
         val draft = (_state.value.sendPhase as? SendPhase.Review)?.draft ?: return
         runCatching {
-            require(psbtSupported() && draft.chain == Chain.BLAKE2B) { "Signing elsewhere is for BTC (BLAKE2b) only." }
+            require(psbtSupported() && draft.chain == Chain.BLAKE2B) { "Signing elsewhere is for XBT (BLAKE2b) only." }
             require(draft.silentRecipient == null) { "A silent payment needs the private keys while building it: send it from a hot wallet." }
             val o = psbtOrigin(origin)
             store.keyOrigin = origin.trim()

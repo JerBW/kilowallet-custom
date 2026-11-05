@@ -75,7 +75,7 @@ fun RpcNodePanel(vm: WalletViewModel, accent: androidx.compose.ui.graphics.Color
         }
         if (conns.isNotEmpty()) Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text("Read BTC from my node (RPC)", style = MaterialTheme.typography.bodyMedium, color = TextMain)
+                Text("Read XBT from my node (RPC)", style = MaterialTheme.typography.bodyMedium, color = TextMain)
                 Explain(if (on) "On: your node answers everything. The first time it looks for this wallet's coins, which can take a few minutes."
                     else "Off: the Electrum server above is used.")
             }

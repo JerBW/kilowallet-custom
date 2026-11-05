@@ -88,7 +88,7 @@ fun ModeChooser(vm: WalletViewModel) {
         ModeCard(
             title = "Simple",
             lines = listOf(
-                "Your BTC and Spamcoin balances, with their value in your currency",
+                "Your XBT and Spamcoin balances, with their value in your currency",
                 "Send and Receive, nothing else in the way",
             ),
             accent = Purple,
@@ -96,8 +96,8 @@ fun ModeChooser(vm: WalletViewModel) {
         ModeCard(
             title = "Advanced",
             lines = listOf(
-                if (com.kilombino.pyblockwatch.ark.Ark.available) "BTC and Ark (instant payments and Lightning), beta"
-                else "BTC (Ark needs an ARM phone: its engine is not built for this one's processor)",
+                if (com.kilombino.pyblockwatch.ark.Ark.available) "XBT and Ark (instant payments and Lightning), beta"
+                else "XBT (Ark needs an ARM phone: its engine is not built for this one's processor)",
                 "Coin control, fees, derivation paths, Silent Payments",
                 "Address list, server certificates, gap limit",
             ),
@@ -214,7 +214,7 @@ fun SimpleScreen(state: UiState, vm: WalletViewModel, onToggleNotifications: (Bo
         }
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            TabChip("BTC", chain == Chain.BLAKE2B, Purple, Modifier.weight(1f)) { pick(Chain.BLAKE2B) }
+            TabChip("XBT", chain == Chain.BLAKE2B, Purple, Modifier.weight(1f)) { pick(Chain.BLAKE2B) }
             TabChip("SPAMCOIN", chain == Chain.SHA256, Color(Chain.SHA256.accent), Modifier.weight(1f)) { pick(Chain.SHA256) }
         }
         state.chains[chain]?.refreshing?.let {
@@ -313,7 +313,7 @@ private fun SimpleBalance(
     onFiat: (String) -> Unit,
 ) {
     val btc = chain == Chain.BLAKE2B
-    val unit = if (btc) "BTC" else "Spamcoin"
+    val unit = if (btc) "XBT" else "Spamcoin"
     // The countdown to the next auto-refresh, as in advanced mode, so the wallet reads as live.
     var secondsUntilRefresh by remember { mutableStateOf(0) }
     // Not in the background either: nobody sees it there.
@@ -471,7 +471,7 @@ internal fun ArkComingSoon(accent: Color) {
         SectionLabel("Ark — not on this phone", accent)
         Spacer(Modifier.height(8.dp))
         Explain(
-            "Ark will let you send BTC instantly between wallets and pay Lightning invoices " +
+            "Ark will let you send XBT instantly between wallets and pay Lightning invoices " +
                 "without opening channels, through the Paperclip Ark server " +
                 "(ark.paperclippool.xyz). Its engine is built for ARM phones (arm64), the ones almost every Android " +
                 "phone uses; this device has another processor (x86, like most emulators), so Ark can't run here."
@@ -505,7 +505,7 @@ private fun AddWidgetButton(accent: Color) {
         mgr.requestPinAppWidget(
             android.content.ComponentName(ctx, com.kilombino.pyblockwatch.widget.XbtWidget::class.java), null, null)
     }) {
-        Text("＋ add the BTC price widget to your home screen",
+        Text("＋ add the XBT price widget to your home screen",
              style = MaterialTheme.typography.bodySmall, color = accent)
     }
 }

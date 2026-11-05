@@ -767,9 +767,9 @@ private fun CreatePool(
         fromCoins && (amount == null || amount < Protocol.TEST_MIN_AMOUNT || amount * outputs!! < minAmount) ->
             "These coins make ${groupSats(maxOf(0L, amount ?: 0L) * outputs!!)} sats in all: a pool takes at least ${groupSats(minAmount)} each, and ${groupSats(Protocol.TEST_MIN_AMOUNT)} per output."
         fromCoins && amount!! > Protocol.MAX_AMOUNT ->
-            "These coins make ${groupSats(amount)} sats per output: a pool takes at most ${groupSats(Protocol.MAX_AMOUNT)} (1 BTC). Tick fewer coins or give more outputs."
+            "These coins make ${groupSats(amount)} sats per output: a pool takes at most ${groupSats(Protocol.MAX_AMOUNT)} (1 XBT). Tick fewer coins or give more outputs."
         amount == null || amount < Protocol.TEST_MIN_AMOUNT || amount > Protocol.MAX_AMOUNT ->
-            "Amount per output: ${groupSats(Protocol.TEST_MIN_AMOUNT)} to ${groupSats(Protocol.MAX_AMOUNT)} sats (1 BTC)."
+            "Amount per output: ${groupSats(Protocol.TEST_MIN_AMOUNT)} to ${groupSats(Protocol.MAX_AMOUNT)} sats (1 XBT)."
         outputs != null && amount * outputs < minAmount ->
             "${groupSats(amount)} × $outputs = ${groupSats(amount * outputs)} sats each: a pool takes at least ${groupSats(minAmount)} each in all."
         rate == null || rate < 1.0 || rate > 500.0 -> "Fee: 1 to 500 sat/vB."
@@ -906,7 +906,7 @@ private fun CreatePool(
                 color = TextFaint, style = MaterialTheme.typography.bodySmall)
             if (!fromCoins) {
                 field(if ((outputs ?: 1) > 1) "amount of each output (sats)" else "amount per person (sats)", amountText) { amountText = it }
-                amount?.let { Text("= ${"%.8f".format(it / 1e8)} BTC" + if ((outputs ?: 1) > 1) " · ${groupSats(it * outputs!!)} sats per person in all" else "",
+                amount?.let { Text("= ${"%.8f".format(it / 1e8)} XBT" + if ((outputs ?: 1) > 1) " · ${groupSats(it * outputs!!)} sats per person in all" else "",
                     color = TextFaint, style = MaterialTheme.typography.bodySmall) }
             }
         }

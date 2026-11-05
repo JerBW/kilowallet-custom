@@ -616,7 +616,7 @@ fun SendSheet(vm: WalletViewModel, accent: Color, onClose: () -> Unit) {
                 }
                 if (d.extra.isNotEmpty()) RowLine("Total sent", "${groupSats(d.totalSent)} sats", accent)
                 if (d.chain == com.kilombino.pyblockwatch.chain.Chain.BLAKE2B)
-                    Text("Signed with the unified sighash: valid only on BTC, it can't be replayed on the spamchain.",
+                    Text("Signed with the unified sighash: valid only on XBT, it can't be replayed on the spamchain.",
                          color = TextFaint, style = MaterialTheme.typography.bodySmall)
                 // A spamchain spend is signed the legacy way (the SHA-256 chain knows nothing
                 // else), so if its coins existed before the fork the same bytes are also valid on

@@ -494,7 +494,7 @@ private fun FundSheet(accent: Color, onTx: (String) -> Unit) {
     Panel(accent = accent) {
         SectionLabel("Fund the node", accent)
         Spacer(Modifier.height(6.dp))
-        Explain("Channels are opened from the node's own on-chain coins. Send to this address from the BTC tab (or anywhere), then open a channel once it confirms.")
+        Explain("Channels are opened from the node's own on-chain coins. Send to this address from the XBT tab (or anywhere), then open a channel once it confirms.")
         Spacer(Modifier.height(8.dp))
         addr?.let { a ->
             val copier = rememberCopier()
@@ -859,20 +859,20 @@ private fun BridgePay(accent: Color, invoice: String, sha: Lnd.PayReq, est: com.
     LaunchedEffect(Unit) { while (wait > 0) { kotlinx.coroutines.delay(1_000); wait-- } }
     val feeLimit = Lightning.feeLimit(ctx, est.maxPaySat)
     AlertDialog(onDismissRequest = { if (!busy) onCancel() },
-        title = { Text("Pay this SHA-256 invoice with BTC?") },
+        title = { Text("Pay this SHA-256 invoice with XBT?") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("This invoice is for Lightning on the SHA-256 chain. Kilombino's bridge can pay it for you: " +
-                    "you pay in BTC, and it pays the invoice.", style = MaterialTheme.typography.bodySmall)
+                    "you pay in XBT, and it pays the invoice.", style = MaterialTheme.typography.bodySmall)
                 if (sha.description.isNotBlank()) Text("“${sha.description}”", style = MaterialTheme.typography.bodySmall, color = TextSoft)
                 Text("Invoice: ${groupSats(sha.sats)} sats SHA-256", style = MaterialTheme.typography.bodyMedium, color = TextMain)
-                Text("You pay about ${groupSats(est.paySat)} sats BTC", style = MaterialTheme.typography.titleMedium, color = accent)
+                Text("You pay about ${groupSats(est.paySat)} sats XBT", style = MaterialTheme.typography.titleMedium, color = accent)
                 Text("Bridge fee ${"%.2f".format(est.spread * 100)} %, at the market price (Neoxa, checked against a second market). " +
                     "If the price moves before paying, at most ${groupSats(est.maxPaySat)} sats; above that nothing is paid. " +
                     "Plus the routing fee to the bridge, at most ${groupSats(feeLimit)} sats.",
                     style = MaterialTheme.typography.bodySmall, color = TextSoft)
                 Text("Nobody holds your money: your payment is held and the bridge can only collect it by paying this invoice. " +
-                    "If it can't, your BTC comes back by itself.",
+                    "If it can't, your XBT comes back by itself.",
                     style = MaterialTheme.typography.bodySmall, color = TextSoft)
                 if (wait > 0) Text(B.text("wait", org.json.JSONObject().put("wait_s", wait)), color = Bad, style = MaterialTheme.typography.bodySmall)
                 if (step.isNotBlank()) Text(step, style = MaterialTheme.typography.bodySmall, color = accent)
@@ -890,14 +890,14 @@ private fun BridgePay(accent: Color, invoice: String, sha: Lnd.PayReq, est: com.
                             val hold = Lnd.decode(q.holdInvoice)
                             B.mismatch(hold, hold.msat, sha, q, est.maxPaySat, System.currentTimeMillis() / 1000)
                                 ?.let { throw IllegalStateException("Not paid: $it.") }
-                            step = "Paying ${groupSats(B.ceilSat(hold.msat))} sats BTC… the bridge pays the invoice and then collects."
+                            step = "Paying ${groupSats(B.ceilSat(hold.msat))} sats XBT… the bridge pays the invoice and then collects."
                             val preimage = try {
                                 Lnd.pay(q.holdInvoice, Lightning.feeLimit(ctx, B.ceilSat(hold.msat)), timeoutSeconds = 60)
                             } catch (e: Exception) {
                                 // What the bridge says about it, when it has something to say.
                                 throw IllegalStateException(when (B.state(ctx, q.hash)) {
-                                    "aborted" -> "Not paid: the price moved against the bridge before it paid, so it gave your BTC back. Nothing was charged."
-                                    "failed" -> "Not paid: the bridge could not pay the SHA-256 invoice (no route there, or the invoice was refused). Your BTC came back."
+                                    "aborted" -> "Not paid: the price moved against the bridge before it paid, so it gave your XBT back. Nothing was charged."
+                                    "failed" -> "Not paid: the bridge could not pay the SHA-256 invoice (no route there, or the invoice was refused). Your XBT came back."
                                     "expired" -> "Not paid: the price expired before your payment reached the bridge. Nothing was charged."
                                     // The bridge has the payment (or already paid with it): the app only lost sight of it.
                                     "funded", "paying", "paid" -> "Your payment reached the bridge and is still being settled: it completes, or comes back, by itself. Don't pay again; see Payments."
@@ -1482,7 +1482,7 @@ private fun ResizeChannelDialog(c: Lnd.Channel, accent: Color, vm: WalletViewMod
                     Text("Send them to:", style = MaterialTheme.typography.bodySmall)
                     if (btc != null) Row(verticalAlignment = Alignment.CenterVertically) {
                         androidx.compose.material3.RadioButton(selected = dest == 0, onClick = { dest = 0 })
-                        Text("My BTC wallet (" + btc.take(10) + "…)", style = MaterialTheme.typography.bodySmall)
+                        Text("My XBT wallet (" + btc.take(10) + "…)", style = MaterialTheme.typography.bodySmall)
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         androidx.compose.material3.RadioButton(selected = dest == 1, onClick = { dest = 1 })
@@ -1566,7 +1566,7 @@ private fun CloseChannelDialog(cs: List<Lnd.Channel>, accent: Color, vm: WalletV
                     Text("Send them to:", style = MaterialTheme.typography.bodySmall)
                     if (btc != null) Row(verticalAlignment = Alignment.CenterVertically) {
                         androidx.compose.material3.RadioButton(selected = dest == 0, onClick = { dest = 0 })
-                        Text("My BTC wallet (" + btc.take(10) + "…)", style = MaterialTheme.typography.bodySmall)
+                        Text("My XBT wallet (" + btc.take(10) + "…)", style = MaterialTheme.typography.bodySmall)
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         androidx.compose.material3.RadioButton(selected = dest == 1, onClick = { dest = 1 })
@@ -1624,7 +1624,7 @@ private fun CloseChannelDialog(cs: List<Lnd.Channel>, accent: Color, vm: WalletV
 /**
  * Speeding up a cooperative close stuck on a low fee. It can't be replaced (both nodes signed
  * it, and it doesn't signal RBF), so the node spends its own output of it with a child that
- * pays for both (CPFP). A close paid to the BTC wallet is sped up from the BTC tab instead.
+ * pays for both (CPFP). A close paid to the BTC wallet is sped up from the XBT tab instead.
  */
 @Composable
 private fun SpeedUpCloseDialog(c: Lnd.Closing, accent: Color, onDone: () -> Unit) {
@@ -1646,8 +1646,8 @@ private fun SpeedUpCloseDialog(c: Lnd.Closing, accent: Color, onDone: () -> Unit
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 when {
                     !looked -> Text("Looking for the node's coin in it…", style = MaterialTheme.typography.bodySmall)
-                    coin == null -> Text("This close doesn't pay the node's on-chain coins. If it pays your BTC wallet, speed it up there: " +
-                        "BTC tab, the incoming transaction, SPEED UP (CPFP).", style = MaterialTheme.typography.bodySmall)
+                    coin == null -> Text("This close doesn't pay the node's on-chain coins. If it pays your XBT wallet, speed it up there: " +
+                        "XBT tab, the incoming transaction, SPEED UP (CPFP).", style = MaterialTheme.typography.bodySmall)
                     else -> {
                         Text("A cooperative close can't be replaced: both nodes signed it. Instead the node spends its " +
                             groupSats(coin!!.sats) + " sats from it with a second transaction whose fee pays for both, " +
