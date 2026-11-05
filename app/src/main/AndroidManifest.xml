@@ -7,7 +7,6 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <!-- Android 14+: the watchers run as specialUse, which has no daily time limit (dataSync has ~6 h on 15). -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <!-- Asked for only when joining a coinjoin: a round must keep running with the screen off. -->
@@ -80,7 +79,7 @@
         <service
             android:name=".data.WatchService"
             android:exported="false"
-            android:foregroundServiceType="dataSync|specialUse">
+            android:foregroundServiceType="specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Watches the wallet's own addresses on its Bitcoin servers and notifies the user of incoming, outgoing and confirmed payments, as the user chose in settings." />
@@ -89,7 +88,7 @@
         <service
             android:name=".coinjoin.CoinjoinService"
             android:exported="false"
-            android:foregroundServiceType="dataSync|specialUse">
+            android:foregroundServiceType="specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Keeps the user's coinjoin round going (answering the other participants and signing as the user allowed) until the round ends, then stops." />

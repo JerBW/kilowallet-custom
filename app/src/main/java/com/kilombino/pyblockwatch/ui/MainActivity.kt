@@ -1141,7 +1141,7 @@ internal fun SettingsPanel(
                 if (chain == Chain.SHA256) vm.select(Chain.BLAKE2B)
                 else if (vm.hasOwnNode(Chain.SHA256)) vm.acceptSpamchain() else warnSpam = true
             }) {
-                Text(if (chain == Chain.SHA256) "BACK TO BTC" else "OPEN", color = accent, style = MaterialTheme.typography.bodySmall)
+                Text(if (chain == Chain.SHA256) "BACK TO XBT" else "OPEN", color = accent, style = MaterialTheme.typography.bodySmall)
             }
         }
         Spacer(Modifier.height(10.dp))

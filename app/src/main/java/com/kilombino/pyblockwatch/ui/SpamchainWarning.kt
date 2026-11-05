@@ -111,7 +111,7 @@ fun SpamchainWarning(vm: WalletViewModel, onContinue: () -> Unit, onBack: () -> 
             }
         },
         confirmButton = { TextButton(onClick = onContinue) { Text("CONTINUE WITH PUBLIC SERVERS", color = Bad) } },
-        dismissButton = { TextButton(onClick = onBack) { Text("BACK TO BTC", color = TextSoft) } },
+        dismissButton = { TextButton(onClick = onBack) { Text("BACK TO XBT", color = TextSoft) } },
         containerColor = PanelBg, titleContentColor = Orange, textContentColor = TextSoft,
     )
 }
