@@ -66,8 +66,8 @@ class Notifier(private val context: Context, private val titlePrefix: String = "
         return (if (v < 0) "-" else "") + sb
     }
 
-    /** The chain as notifications name it: "Bitcoin" for the BLAKE2b chain, "SHA-256" for the other. */
-    internal fun label(chain: Chain): String = if (chain == Chain.BLAKE2B) "Bitcoin" else chain.display
+    /** The chain as notifications name it. */
+    internal fun label(chain: Chain): String = if (chain == Chain.BLAKE2B) "XBT" else chain.display
 
     fun found(chain: Chain, confirmed: Long, unconfirmed: Long) {
         val total = confirmed + unconfirmed
@@ -95,25 +95,53 @@ class Notifier(private val context: Context, private val titlePrefix: String = "
         post(("lnrecv:$key").hashCode(), "⚡ Lightning: received",
              "+${sats(amount)} sats" + (if (memo.isNotBlank()) "\n“$memo”" else ""), OpenTab.LIGHTNING)
 
-    // A payment is one notification: in the mempool (0 conf), then the same one again at its first
-    // block (1 conf), so the two don't pile up. Its wallet is in the title prefix.
-    fun mempoolIn(chain: Chain, amount: Long, txid: String) =
-        post(idFor(chain, "pay", txid), "Received", "${label(chain)} · +${sats(amount)} sats · 0 conf", tabFor(chain))
+    /**
+     * Persistent dedupe across foreground/background overlap and process restarts.
+     * A mempool alert and its later confirmation are deliberately separate phases.
+     */
+    private fun shouldSuppressTx(chain: Chain, phase: String, txid: String): Boolean {
+        if (txid.isBlank()) return false
+        synchronized(Notifier::class.java) {
+            val prefs = context.getSharedPreferences("pyblockwatch_txid_dedupe", Context.MODE_PRIVATE)
+            val key = titlePrefix + chain.id + "_" + phase + "_" + txid
+            if (prefs.getBoolean(key, false)) return true
+            prefs.edit().putBoolean(key, true).apply()
+            return false
+        }
+    }
 
-    fun mempoolOut(chain: Chain, amount: Long, txid: String) =
-        post(idFor(chain, "pay", txid), "Sent", "${label(chain)} · −${sats(amount)} sats · 0 conf", tabFor(chain))
+    fun mempoolIn(chain: Chain, amount: Long, txid: String) {
+        if (shouldSuppressTx(chain, "mem", txid)) return
+        post(idFor(chain, "mem", txid), "Received",
+             "${label(chain)} · +${sats(amount)} sats · 0 conf", tabFor(chain))
+    }
 
-    fun firstConfIn(chain: Chain, amount: Long, txid: String) =
-        post(idFor(chain, "pay", txid), "Received ✅", "${label(chain)} · +${sats(amount)} sats · 1 conf", tabFor(chain))
+    fun mempoolOut(chain: Chain, amount: Long, txid: String) {
+        if (shouldSuppressTx(chain, "mem", txid)) return
+        post(idFor(chain, "mem", txid), "Sent",
+             "${label(chain)} · −${sats(amount)} sats · 0 conf", tabFor(chain))
+    }
+
+    fun firstConfIn(chain: Chain, amount: Long, txid: String) {
+        if (shouldSuppressTx(chain, "conf", txid)) return
+        post(idFor(chain, "conf", txid), "Received ✅",
+             "${label(chain)} · +${sats(amount)} sats · 1 conf", tabFor(chain))
+    }
 
     /** A confirmed incoming payment whose proof (merkle + block proof of work) did not check out. */
-    fun unprovenIn(chain: Chain, amount: Long, txid: String) =
+    fun unprovenIn(chain: Chain, amount: Long, txid: String) {
+        // Occupies the same confirmation phase: a tx must never produce both.
+        if (shouldSuppressTx(chain, "conf", txid)) return
         post(idFor(chain, "unproven", txid), "⚠ Incoming payment NOT proven",
              "${label(chain)} · +${sats(amount)} sats: the server says it confirmed, but its proof does not check " +
                  "out. Do not count on it; check it on your own node or another server.", tabFor(chain))
+    }
 
-    fun firstConfOut(chain: Chain, amount: Long, txid: String) =
-        post(idFor(chain, "pay", txid), "Sent ✅", "${label(chain)} · −${sats(amount)} sats · 1 conf", tabFor(chain))
+    fun firstConfOut(chain: Chain, amount: Long, txid: String) {
+        if (shouldSuppressTx(chain, "conf", txid)) return
+        post(idFor(chain, "conf", txid), "Sent ✅",
+             "${label(chain)} · −${sats(amount)} sats · 1 conf", tabFor(chain))
+    }
 
     // A change we only ever saw already-confirmed (received or spent between two checks,
     // never observed in the mempool). No txid to key on, so it collapses per chain.
@@ -223,23 +251,17 @@ class Notifier(private val context: Context, private val titlePrefix: String = "
 }
 
 /**
- * The balance-diff brain, shared by the background service and the foreground refresh.
+ * The balance notification engine shared by foreground refreshes and WatchService.
  *
- * Given the fresh confirmed/unconfirmed totals and the current transaction list for a
- * chain, it works out what actually happened since the last notification and fires the
- * right alerts — arrival in the mempool, first confirmation, or a change only ever seen
- * confirmed — then advances the stored baseline so nothing fires twice.
- *
- * Amounts are attributed from the aggregate balance delta, which is exact for the common
- * one-movement-at-a-time case; when several land in the same window it degrades to a
- * single grouped figure rather than inventing per-tx splits.
+ * Scanner supplies the exact signed wallet effect of each transaction (+ received,
+ * - sent including its fee), so notifications are attributed by txid rather than by
+ * dividing an aggregate balance delta.
  */
 object BalanceWatch {
 
     /**
-     * One at a time: the watcher, the app's refresh and a look after a coinjoin round can check
-     * the same wallet together, and each must see the baseline the one before it left, or the
-     * same payment is told twice.
+     * Foreground refreshes, WatchService and post-coinjoin looks can overlap. Serialize
+     * them so every look sees the state left by the preceding one.
      */
     @Synchronized
     fun evaluate(
@@ -250,78 +272,129 @@ object BalanceWatch {
         unconfirmed: Long,
         txs: List<TxConf>,
         /**
-         * This phone's coinjoin transactions: they move the balance as any payment, but their round
-         * tells about them (sent, then received in this wallet), so they are counted here in silence.
+         * Coinjoins belonging to this phone are already described by their round
+         * notifications, so the ordinary wallet watcher records them silently.
          */
         coinjoins: Set<String> = emptySet(),
     ) {
         val prevConf = store.lastNotifiedConf(chain)
-        val prevUnconf = store.lastNotifiedUnconf(chain)
         val newTotal = confirmed + unconfirmed
 
+        val byId = txs.associateBy { it.txid }
+        val currentIds = byId.keys
         val currentPending = txs.filter { it.pending }.map { it.txid }.toSet()
         val currentConfirmed = txs.filter { !it.pending }.map { it.txid }.toSet()
 
-        // First time we ever look at this chain: set the baseline, ping once if there are
-        // funds, and record what is already pending so we don't later announce it as new.
-        if (prevConf < 0) {
-            if (newTotal > 0) notifier.found(chain, confirmed, unconfirmed)
-            store.setPendingMap(chain, currentPending.associateWith { 0L })
+        val seenCoinjoins = store.coinjoinsSeen(chain)
+        val currentCoinjoins = currentIds.intersect(coinjoins)
+        val suppressedCoinjoins = seenCoinjoins + currentCoinjoins
+
+        /*
+         * First look, or first look after upgrading from a build without known-txid
+         * tracking: seed history silently so years of transactions are not replayed.
+         * A genuinely new wallet may still get the one balance-detected notification.
+         */
+        val known = store.knownTxids(chain)
+        if (prevConf < 0 || known == null) {
+            if (prevConf < 0 && newTotal > 0)
+                notifier.found(chain, confirmed, unconfirmed)
+
+            store.setPendingMap(
+                chain,
+                currentPending.associateWith { byId[it]?.amount ?: 0L },
+            )
+            store.setKnownTxids(chain, currentIds)
             store.setLastNotified(chain, confirmed, unconfirmed)
+
+            if (currentCoinjoins.isNotEmpty())
+                store.setCoinjoinsSeen(chain, seenCoinjoins + currentCoinjoins)
             return
         }
 
         val prevMap = store.pendingMap(chain)
-        val totalDelta = newTotal - (prevConf + prevUnconf)
 
-        val newPending = (currentPending - prevMap.keys).toList()
+        val newIds = currentIds - known
+        val newPending = newIds.filter { it in currentPending }
+        val directConfirmed = newIds.filter { it in currentConfirmed }
         val nowConfirmed = prevMap.keys.filter { it in currentConfirmed }
-        // Pending txids that vanished without confirming were replaced/evicted: drop quietly.
 
-        val newAmounts = HashMap<String, Long>()
-        // Coinjoins of ours this wallet sees for the first time, pending or already confirmed.
-        val seen = store.coinjoinsSeen(chain)
-        val freshCoinjoins = txs.map { it.txid }.filter { it in coinjoins && it !in seen }
+        /*
+         * 1. Transactions newly seen in the mempool.
+         *
+         * Each TxConf carries its exact signed wallet effect. If that amount is
+         * temporarily unavailable, do not mark the tx known yet: the next look retries.
+         */
+        newPending.forEach { txid ->
+            if (txid in suppressedCoinjoins) return@forEach
 
-        // 1) New mempool transaction(s). The whole balance delta this cycle is theirs,
-        //    since confirmations are balance-neutral. Only a coinjoin among them: not told here.
-        if (newPending.isNotEmpty()) {
-            val share = if (newPending.size == 1) totalDelta else totalDelta / newPending.size
-            newPending.forEach { newAmounts[it] = share }
-            if (newPending.all { it in coinjoins }) Unit
-            else if (totalDelta >= 0) notifier.mempoolIn(chain, totalDelta, newPending.first { it !in coinjoins })
-            else notifier.mempoolOut(chain, -totalDelta, newPending.first { it !in coinjoins })
+            val amount = byId[txid]?.amount ?: return@forEach
+            if (amount > 0)
+                notifier.mempoolIn(chain, amount, txid)
+            else if (amount < 0)
+                notifier.mempoolOut(chain, -amount, txid)
         }
 
-        // 2) Transactions that were pending and just got their first confirmation.
-        val unproven = txs.filter { it.spv == false }.map { it.txid }.toSet()
+        /*
+         * 2. Transactions we saw pending that have just confirmed.
+         *
+         * Prefer the freshly parsed amount; fall back to the exact amount remembered
+         * while the tx was pending.
+         */
         nowConfirmed.forEach { txid ->
-            if (txid in coinjoins) return@forEach
-            val amount = prevMap[txid] ?: 0L
-            if (amount >= 0 && txid in unproven) notifier.unprovenIn(chain, amount, txid)
-            else if (amount >= 0) notifier.firstConfIn(chain, amount, txid)
-            else notifier.firstConfOut(chain, -amount, txid)
+            if (txid in suppressedCoinjoins) return@forEach
+
+            val tx = byId[txid]
+            val amount = tx?.amount ?: prevMap[txid] ?: 0L
+
+            if (amount > 0 && tx?.spv == false)
+                notifier.unprovenIn(chain, amount, txid)
+            else if (amount > 0)
+                notifier.firstConfIn(chain, amount, txid)
+            else if (amount < 0)
+                notifier.firstConfOut(chain, -amount, txid)
         }
 
-        // 3) A balance change we never saw in the mempool — received or spent already
-        //    confirmed (common with the 5-minute background gap).
-        //    It may still be unconfirmed (e.g. a payment to yourself, or an address the watcher
-        //    only just started following): then say so instead of calling it confirmed.
-        //    A coinjoin of ours first seen here (between two looks) is the change: nothing to tell.
-        if (newPending.isEmpty() && totalDelta != 0L && freshCoinjoins.isEmpty()) {
-            val stillPending = unconfirmed != prevUnconf
-            // A fresh confirmed payment that failed its proof is reported as such, not as received.
-            val freshUnproven = txs.firstOrNull { it.spv == false && it.confirmations in 1..6 }
-            if (totalDelta > 0 && !stillPending && freshUnproven != null) notifier.unprovenIn(chain, totalDelta, freshUnproven.txid)
-            else if (totalDelta > 0) { if (stillPending) notifier.receivedPending(chain, totalDelta) else notifier.receivedConfirmed(chain, totalDelta) }
-            else { if (stillPending) notifier.sentPending(chain, -totalDelta) else notifier.sentConfirmed(chain, -totalDelta) }
+        /*
+         * 3. Transactions first discovered already confirmed, for example when they
+         * arrived and confirmed between two background checks.
+         */
+        directConfirmed.forEach { txid ->
+            if (txid in suppressedCoinjoins) return@forEach
+
+            val tx = byId[txid] ?: return@forEach
+            val amount = tx.amount ?: return@forEach
+
+            if (amount > 0 && tx.spv == false)
+                notifier.unprovenIn(chain, amount, txid)
+            else if (amount > 0)
+                notifier.firstConfIn(chain, amount, txid)
+            else if (amount < 0)
+                notifier.firstConfOut(chain, -amount, txid)
         }
 
-        // Advance the baseline: pending set becomes the current one, carrying amounts
-        // forward for those still pending and dropping the confirmed/vanished ones.
-        val nextMap = currentPending.associateWith { prevMap[it] ?: newAmounts[it] ?: 0L }
+        /*
+         * Mark only successfully resolved new transactions as known. Coinjoins are
+         * deliberately marked known even if their amount was unavailable: their own
+         * round already owns the notification and they must not appear later as a
+         * normal payment.
+         */
+        val resolvedNew = newIds.filter {
+            byId[it]?.amount != null || it in suppressedCoinjoins
+        }.toSet()
+        store.setKnownTxids(chain, known + resolvedNew)
+
+        /*
+         * Carry exact pending amounts into the confirmation phase. A temporarily
+         * unresolved amount remains 0 here, but because its txid was not added to
+         * knownTxids it will still be retried on the next look.
+         */
+        val nextMap = currentPending.associateWith { txid ->
+            byId[txid]?.amount ?: prevMap[txid] ?: 0L
+        }
         store.setPendingMap(chain, nextMap)
         store.setLastNotified(chain, confirmed, unconfirmed)
-        if (freshCoinjoins.isNotEmpty()) store.setCoinjoinsSeen(chain, seen + freshCoinjoins)
+
+        if (currentCoinjoins.isNotEmpty())
+            store.setCoinjoinsSeen(chain, seenCoinjoins + currentCoinjoins)
     }
 }
