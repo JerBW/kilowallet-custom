@@ -608,7 +608,13 @@ private fun WalletScreen(state: UiState, vm: WalletViewModel, onToggleNotificati
     }
     // Advanced always opens on BTC | ARK: the spamchain only shows when opened from settings.
     LaunchedEffect(Unit) { if (state.selected == Chain.SHA256) vm.select(Chain.BLAKE2B) }
-    val accent by animateColorAsState(if (arkTab) ArkRed else Color(chain.accent), tween(400), label = "accent")
+    val accent by animateColorAsState(
+        if (arkTab) ArkRed
+        else if (chain == Chain.BLAKE2B) Purple
+        else Color(chain.accent),
+        tween(400),
+        label = "accent",
+    )
     var showSend by remember { mutableStateOf(false) }
     var showReceive by remember { mutableStateOf(false) }
     // BACK from a payment's pool sheet: SEND again, on BTC, with what was typed (SendSheet takes it).
@@ -802,7 +808,7 @@ private fun AdvancedTabs(chain: Chain, arkTab: Boolean, cjTab: Boolean, lnTab: B
     ) {
         // Each tab: its symbol over its name (a chain, lightning, a swirl, a boat).
         val tabs = buildList {
-            add(Triple("⛓\nXBT", !arkTab && !cjTab && !lnTab && chain == Chain.BLAKE2B, Color(Chain.BLAKE2B.accent)) to onBtc)
+            add(Triple("⛓\nXBT", !arkTab && !cjTab && !lnTab && chain == Chain.BLAKE2B, Purple) to onBtc)
             if (hot) {
                 add(Triple("⚡\nLIGHTNING", lnTab, LnGold) to onLn)
                 add(Triple("🌀\nCOINJOIN", cjTab, CoinjoinBlue) to onCoinjoin)
@@ -1068,8 +1074,18 @@ internal fun AddressList(rows: List<AddressRow>, accent: Color, vm: WalletViewMo
                         val locked = cs!!.mapNotNull { im?.of(it) }
                         val next = locked.minByOrNull { it.maturesAt }
                         // Mined rewards still locked among them: how many, and when the next one can be spent.
-                        if (next != null) Text("${cs.size} coins · ${locked.size} locked until ~${approxDay(im!!, next.maturesAt)}",
-                            style = MaterialTheme.typography.bodySmall, color = Warn)
+                        if (next != null) {
+                            Text(
+                                "⛏  ${cs.size} coins · ${locked.size} locked",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MiningWarn,
+                            )
+                            Text(
+                                "next unlock: ${next.maturesAt} · ${approxDay(im!!, next.maturesAt)}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MiningWarn,
+                            )
+                        }
                         Text((if (isOpen) "▾ " else "▸ ") + "${cs.size} coins", style = MaterialTheme.typography.bodySmall, color = accent,
                             modifier = Modifier.clickable {
                                 val l = unfolded.split(',').filter { it.isNotEmpty() }

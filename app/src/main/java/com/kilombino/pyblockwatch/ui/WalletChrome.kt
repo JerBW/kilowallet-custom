@@ -270,7 +270,7 @@ fun CoinsCard(state: UiState, vm: WalletViewModel, chain: Chain, accent: Color) 
                 Column(Modifier.weight(1f)) {
                     Text(street("${groupSats(u.value)} ${if (chain == Chain.BLAKE2B) "sats" else "poolsats"}"),
                         style = MaterialTheme.typography.bodyMedium, color = TextMain)
-                    Text(immatureLine(im!!, c), style = MaterialTheme.typography.bodySmall, color = Warn)
+                    Text(immatureLine(im!!, c), style = MaterialTheme.typography.bodySmall, color = MiningWarn)
                 }
                 Spacer(Modifier.width(8.dp))
                 Text("$conf conf", style = MaterialTheme.typography.bodySmall, color = Warn)
@@ -313,13 +313,13 @@ internal fun xpubNeedsType(xpub: String): Boolean =
 
 // ------------------------------------------------------------------------------- mined rewards
 
-/** "2026-11-03", roughly when block [height] comes at [im]'s recent pace. */
+/** "11-03-2026", roughly when block [height] comes at [im]'s recent pace. */
 internal fun approxDay(im: com.kilombino.pyblockwatch.data.Scanner.Immature, height: Int): String =
-    java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.ROOT).format(java.util.Date(im.eta(height) * 1000))
+    java.text.SimpleDateFormat("MM-dd-yyyy", java.util.Locale.ROOT).format(java.util.Date(im.eta(height) * 1000))
 
 /** A coin's line when it is a mined reward still locked: from which block it can be spent, and about when. */
 internal fun immatureLine(im: com.kilombino.pyblockwatch.data.Scanner.Immature, c: com.kilombino.pyblockwatch.data.Scanner.ImmatureCoin): String =
-    "⛏ mined reward · matures at block ${c.maturesAt} (~${approxDay(im, c.maturesAt)})"
+    "⛏ mined reward locked · next unlock: ${c.maturesAt} · ${approxDay(im, c.maturesAt)}"
 
 /**
  * Under the balance: how much of it is mined rewards still locked (the balance counts them, SEND
@@ -332,13 +332,29 @@ internal fun ImmatureBalanceNote(vm: WalletViewModel, chain: Chain, cs: ChainSta
     val all by vm.immature.collectAsState()
     val im = vm.immatureFor(chain, all) ?: return
     if (im.coins.isEmpty()) return
-    val first = im.coins.first(); val last = im.coins.last()
+    val first = im.coins.first()
+    val last = im.coins.last()
+
     Spacer(Modifier.height(4.dp))
-    Text(if (first.maturesAt == last.maturesAt)
-        street("of which ${groupSats(im.total)} sats are mined rewards still locked (until block ${last.maturesAt}, ~${approxDay(im, last.maturesAt)})")
-        else street("of which ${groupSats(im.total)} sats are mined rewards still locked: the next unlocks at block ${first.maturesAt} " +
-            "(~${approxDay(im, first.maturesAt)}), the last at block ${last.maturesAt} (~${approxDay(im, last.maturesAt)})"),
-        style = MaterialTheme.typography.bodySmall, color = Warn)
+    Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+        Text(
+            street("⛏  ${groupSats(im.total)} mined sats locked"),
+            style = MaterialTheme.typography.bodySmall,
+            color = MiningWarn,
+        )
+        Text(
+            "next unlock: ${first.maturesAt} · ${approxDay(im, first.maturesAt)}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MiningWarn,
+        )
+        if (last.maturesAt != first.maturesAt) {
+            Text(
+                "last unlock: ${last.maturesAt} · ${approxDay(im, last.maturesAt)}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MiningWarn,
+            )
+        }
+    }
 }
 
 /** In SEND: why MAX is less than the balance, when mined rewards are still locked. */

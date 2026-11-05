@@ -33,6 +33,8 @@ val TextFaint: Color get() = Palette.current.textFaint
 /** The general accent, BTC's orange (named for the app's first colour). */
 val Purple: Color get() = Palette.current.accent
 val Orange = Color(0xFFF7931A)
+/** Persistent mined-reward maturity information: softer than a warning. */
+val MiningWarn = Color(0xFFC77A2E)
 val Good = Color(0xFF34D399)
 /** Lightning (the LN tab). */
 val LnGold = Color(0xFFF5B83D)
